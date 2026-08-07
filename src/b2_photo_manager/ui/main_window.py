@@ -1,9 +1,10 @@
 import logging
 from pathlib import Path
 
-from PySide6.QtCore import QThreadPool, Qt
-from PySide6.QtGui import QAction, QImage, QPixmap
+from PySide6.QtCore import Qt, QThreadPool
+from PySide6.QtGui import QAction, QImage, QPixmap, QResizeEvent
 from PySide6.QtWidgets import (
+    QComboBox,
     QFileDialog,
     QGridLayout,
     QHBoxLayout,
@@ -20,12 +21,17 @@ from PySide6.QtWidgets import (
 
 from b2_photo_manager.config import CONFIG
 from b2_photo_manager.models.photo import Photo
+from b2_photo_manager.services.gallery_layout import calculate_columns
 from b2_photo_manager.services.photo_finder import find_photos
 from b2_photo_manager.services.thumbnail_service import ThumbnailWorker
 from b2_photo_manager.ui.photo_card import PhotoCard
 from b2_photo_manager.ui.preview_dialog import PreviewDialog
 
 LOGGER = logging.getLogger(__name__)
+
+FILTER_ALL = "Alle"
+FILTER_SELECTED = "Ausgewählt"
+FILTER_UNSELECTED = "Nicht ausgewählt"
 
 
 class MainWindow(QMainWindow):
@@ -35,6 +41,7 @@ class MainWindow(QMainWindow):
         self.photos: list[Photo] = []
         self.cards: dict[Path, PhotoCard] = {}
         self.loaded_count = 0
+        self.current_columns = 0
         self.thread_pool = QThreadPool.globalInstance()
 
         self.setWindowTitle(f"{CONFIG.app_name} {CONFIG.version}")
@@ -67,7 +74,7 @@ class MainWindow(QMainWindow):
     def _build_content(self) -> None:
         self.heading = QLabel(CONFIG.app_name)
         self.heading.setStyleSheet(
-            "font-size:26px; font-weight:600;"
+            "font-size: 26px; font-weight: 600;"
         )
 
         self.summary_label = QLabel(
@@ -77,6 +84,18 @@ class MainWindow(QMainWindow):
         self.open_button = QPushButton("Fotoordner auswählen")
         self.open_button.clicked.connect(self.choose_folder)
 
+        self.filter_combo = QComboBox()
+        self.filter_combo.addItems(
+            [
+                FILTER_ALL,
+                FILTER_SELECTED,
+                FILTER_UNSELECTED,
+            ]
+        )
+        self.filter_combo.currentTextChanged.connect(
+            self._apply_filter
+        )
+
         top = QHBoxLayout()
         top.addWidget(self.heading)
         top.addStretch()
@@ -85,6 +104,8 @@ class MainWindow(QMainWindow):
         controls = QHBoxLayout()
         controls.addWidget(self.open_button)
         controls.addStretch()
+        controls.addWidget(QLabel("Anzeige:"))
+        controls.addWidget(self.filter_combo)
 
         self.grid_widget = QWidget()
         self.grid_layout = QGridLayout(self.grid_widget)
@@ -92,18 +113,22 @@ class MainWindow(QMainWindow):
             Qt.AlignmentFlag.AlignTop
             | Qt.AlignmentFlag.AlignLeft
         )
-        self.grid_layout.setHorizontalSpacing(14)
-        self.grid_layout.setVerticalSpacing(14)
+        self.grid_layout.setHorizontalSpacing(
+            CONFIG.gallery_spacing
+        )
+        self.grid_layout.setVerticalSpacing(
+            CONFIG.gallery_spacing
+        )
 
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setWidget(self.grid_widget)
+        self.scroll = QScrollArea()
+        self.scroll.setWidgetResizable(True)
+        self.scroll.setWidget(self.grid_widget)
 
         layout = QVBoxLayout()
         layout.setContentsMargins(18, 18, 18, 18)
         layout.addLayout(top)
         layout.addLayout(controls)
-        layout.addWidget(scroll)
+        layout.addWidget(self.scroll)
 
         container = QWidget()
         container.setLayout(layout)
@@ -154,8 +179,10 @@ class MainWindow(QMainWindow):
         ]
         self.cards = {}
         self.loaded_count = 0
+        self.current_columns = 0
+        self.filter_combo.setCurrentText(FILTER_ALL)
 
-        for index, photo in enumerate(self.photos):
+        for photo in self.photos:
             card = PhotoCard(photo)
             card.selection_changed.connect(
                 self._on_selection_changed
@@ -164,14 +191,6 @@ class MainWindow(QMainWindow):
                 self._open_preview
             )
             self.cards[photo.path] = card
-
-            row = index // CONFIG.thumbnail_columns
-            column = index % CONFIG.thumbnail_columns
-            self.grid_layout.addWidget(
-                card,
-                row,
-                column,
-            )
 
             worker = ThumbnailWorker(photo.path)
             worker.signals.loaded.connect(
@@ -182,6 +201,7 @@ class MainWindow(QMainWindow):
             )
             self.thread_pool.start(worker)
 
+        self._relayout_gallery(force=True)
         self._update_status()
 
     def _clear_grid(self) -> None:
@@ -190,7 +210,68 @@ class MainWindow(QMainWindow):
             widget = item.widget()
 
             if widget is not None:
+                widget.setParent(None)
                 widget.deleteLater()
+
+    def _visible_photos(self) -> list[Photo]:
+        filter_name = self.filter_combo.currentText()
+
+        if filter_name == FILTER_SELECTED:
+            return [
+                photo
+                for photo in self.photos
+                if photo.selected
+            ]
+
+        if filter_name == FILTER_UNSELECTED:
+            return [
+                photo
+                for photo in self.photos
+                if not photo.selected
+            ]
+
+        return list(self.photos)
+
+    def _apply_filter(self) -> None:
+        self._relayout_gallery(force=True)
+        self._update_status()
+
+    def _relayout_gallery(self, force: bool = False) -> None:
+        if not self.cards:
+            return
+
+        card_width = CONFIG.thumbnail_width + 24
+        viewport_width = self.scroll.viewport().width()
+        columns = calculate_columns(
+            viewport_width=viewport_width,
+            card_width=card_width,
+            spacing=CONFIG.gallery_spacing,
+            minimum=CONFIG.thumbnail_min_columns,
+        )
+
+        visible_photos = self._visible_photos()
+
+        if not force and columns == self.current_columns:
+            return
+
+        while self.grid_layout.count():
+            self.grid_layout.takeAt(0)
+
+        for card in self.cards.values():
+            card.hide()
+
+        for index, photo in enumerate(visible_photos):
+            card = self.cards[photo.path]
+            row = index // columns
+            column = index % columns
+            self.grid_layout.addWidget(
+                card,
+                row,
+                column,
+            )
+            card.show()
+
+        self.current_columns = columns
 
     def _on_thumbnail_loaded(
         self,
@@ -235,6 +316,9 @@ class MainWindow(QMainWindow):
         if card is not None:
             card.refresh_style()
 
+        if self.filter_combo.currentText() != FILTER_ALL:
+            self._relayout_gallery(force=True)
+
         self._update_status()
 
     def _open_preview(self, path: Path) -> None:
@@ -257,6 +341,7 @@ class MainWindow(QMainWindow):
         )
         dialog.exec()
 
+        self._relayout_gallery(force=True)
         self._update_status()
 
     def select_all(self) -> None:
@@ -264,6 +349,7 @@ class MainWindow(QMainWindow):
             photo.selected = True
             self.cards[photo.path].refresh_style()
 
+        self._relayout_gallery(force=True)
         self._update_status()
 
     def clear_selection(self) -> None:
@@ -271,6 +357,7 @@ class MainWindow(QMainWindow):
             photo.selected = False
             self.cards[photo.path].refresh_style()
 
+        self._relayout_gallery(force=True)
         self._update_status()
 
     def _update_status(self) -> None:
@@ -279,17 +366,23 @@ class MainWindow(QMainWindow):
             for photo in self.photos
         )
         total = len(self.photos)
+        visible = len(self._visible_photos()) if total else 0
 
         self.summary_label.setText(
-            f"{selected} ausgewählt · {total} Fotos"
+            f"{total} Fotos · {selected} ausgewählt"
         )
 
         if total:
             message = (
-                "Vorschaubilder geladen: "
+                f"{visible} sichtbar · "
+                f"Vorschaubilder geladen: "
                 f"{self.loaded_count}/{total}"
             )
         else:
             message = "Noch kein Fotoordner geladen"
 
         self.statusBar().showMessage(message)
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._relayout_gallery()

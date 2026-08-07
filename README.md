@@ -4,13 +4,15 @@ Desktop photo selection workflow for event and product photography.
 
 ## Current version
 
-v0.2.0
+v0.2.1
 
 ## Features
 
 - Recursive photo folder import
 - Asynchronous thumbnails
-- Manual selection
+- Responsive gallery layout
+- Manual selection with clear visual state
+- Browser filters: all / selected / unselected
 - Large photo viewer
 - Keyboard navigation
 - Fit / 100% / 200% zoom

@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent, QPixmap
-from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QVBoxLayout
 
 from b2_photo_manager.config import CONFIG
 from b2_photo_manager.models.photo import Photo
@@ -14,6 +14,8 @@ class PhotoCard(QFrame):
         super().__init__()
 
         self.photo = photo
+        self.setObjectName("PhotoCard")
+        self.setFixedWidth(CONFIG.thumbnail_width + 24)
 
         self.thumbnail_label = QLabel("Lade Vorschau …")
         self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -22,11 +24,25 @@ class PhotoCard(QFrame):
             CONFIG.thumbnail_height,
         )
 
+        self.selection_label = QLabel()
+        self.selection_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.selection_label.setMinimumWidth(92)
+
         self.name_label = QLabel(photo.path.name)
         self.name_label.setWordWrap(True)
+        self.name_label.setTextInteractionFlags(
+            Qt.TextInteractionFlag.NoTextInteraction
+        )
+
+        meta_row = QHBoxLayout()
+        meta_row.setContentsMargins(0, 0, 0, 0)
+        meta_row.addWidget(self.selection_label)
+        meta_row.addStretch()
 
         layout = QVBoxLayout(self)
+        layout.setContentsMargins(10, 10, 10, 10)
         layout.addWidget(self.thumbnail_label)
+        layout.addLayout(meta_row)
         layout.addWidget(self.name_label)
 
         self.setCursor(Qt.CursorShape.PointingHandCursor)
@@ -46,22 +62,28 @@ class PhotoCard(QFrame):
 
     def refresh_style(self) -> None:
         if self.photo.selected:
+            self.selection_label.setText("✓ Ausgewählt")
+            self.selection_label.setStyleSheet(
+                "font-weight: 600; padding: 3px 6px;"
+            )
             self.setStyleSheet(
                 """
-                PhotoCard {
+                QFrame#PhotoCard {
                     border: 3px solid #3ba55d;
-                    border-radius: 8px;
-                    padding: 4px;
+                    border-radius: 10px;
                 }
                 """
             )
         else:
+            self.selection_label.setText("Nicht ausgewählt")
+            self.selection_label.setStyleSheet(
+                "padding: 3px 6px;"
+            )
             self.setStyleSheet(
                 """
-                PhotoCard {
+                QFrame#PhotoCard {
                     border: 1px solid #777;
-                    border-radius: 8px;
-                    padding: 6px;
+                    border-radius: 10px;
                 }
                 """
             )
