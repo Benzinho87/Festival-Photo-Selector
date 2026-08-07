@@ -1,44 +1,80 @@
-from pathlib import Path
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QMouseEvent, QPixmap
 from PySide6.QtWidgets import QFrame, QLabel, QVBoxLayout
+
 from b2_photo_manager.config import CONFIG
 from b2_photo_manager.models.photo import Photo
 
+
 class PhotoCard(QFrame):
     selection_changed = Signal(object)
-    open_requested = Signal(Path)
+    open_requested = Signal(object)
+
     def __init__(self, photo: Photo) -> None:
         super().__init__()
-        self.photo=photo
-        self.setObjectName("photoCard")
-        self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setFixedWidth(CONFIG.thumbnail_width+20)
-        self.image_label=QLabel("Lädt …")
-        self.image_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.image_label.setFixedSize(CONFIG.thumbnail_width, CONFIG.thumbnail_height)
-        self.name_label=QLabel(photo.path.name)
+
+        self.photo = photo
+
+        self.thumbnail_label = QLabel("Lade Vorschau …")
+        self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.thumbnail_label.setFixedSize(
+            CONFIG.thumbnail_width,
+            CONFIG.thumbnail_height,
+        )
+
+        self.name_label = QLabel(photo.path.name)
         self.name_label.setWordWrap(True)
-        self.name_label.setToolTip(str(photo.path))
-        layout=QVBoxLayout(self)
-        layout.addWidget(self.image_label)
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(self.thumbnail_label)
         layout.addWidget(self.name_label)
+
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.refresh_style()
+
     def set_thumbnail(self, pixmap: QPixmap) -> None:
-        self.image_label.setPixmap(pixmap)
+        self.thumbnail_label.setPixmap(
+            pixmap.scaled(
+                self.thumbnail_label.size(),
+                Qt.AspectRatioMode.KeepAspectRatio,
+                Qt.TransformationMode.SmoothTransformation,
+            )
+        )
+
     def set_error(self, message: str) -> None:
-        self.image_label.setText("Fehler")
-        self.image_label.setToolTip(message)
+        self.thumbnail_label.setText(f"Fehler\n{message}")
+
     def refresh_style(self) -> None:
-        border="3px solid #41b96b" if self.photo.selected else "1px solid #3a3a3a"
-        self.setStyleSheet(f"QFrame#photoCard {{background:#1c1c1c;border:{border};border-radius:10px;}}")
+        if self.photo.selected:
+            self.setStyleSheet(
+                """
+                PhotoCard {
+                    border: 3px solid #3ba55d;
+                    border-radius: 8px;
+                    padding: 4px;
+                }
+                """
+            )
+        else:
+            self.setStyleSheet(
+                """
+                PhotoCard {
+                    border: 1px solid #777;
+                    border-radius: 8px;
+                    padding: 6px;
+                }
+                """
+            )
+
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button()==Qt.MouseButton.LeftButton:
-            self.photo.selected=not self.photo.selected
-            self.refresh_style()
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.photo.selected = not self.photo.selected
             self.selection_changed.emit(self.photo)
+
         super().mousePressEvent(event)
+
     def mouseDoubleClickEvent(self, event: QMouseEvent) -> None:
-        if event.button()==Qt.MouseButton.LeftButton:
+        if event.button() == Qt.MouseButton.LeftButton:
             self.open_requested.emit(self.photo.path)
+
         super().mouseDoubleClickEvent(event)

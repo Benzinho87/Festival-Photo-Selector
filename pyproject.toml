@@ -4,14 +4,20 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "b2-photo-manager"
-version = "0.1.0"
-description = "Desktop photo selection and export workflow."
+version = "0.2.0"
+description = "Desktop photo selection and export workflow for events and product photography."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
-dependencies = ["PySide6==6.8.3", "Pillow==11.1.0"]
+dependencies = [
+    "PySide6==6.8.3",
+    "Pillow==11.1.0",
+]
 
 [project.optional-dependencies]
-dev = ["pytest==8.3.5", "ruff==0.9.10"]
+dev = [
+    "pytest==8.3.5",
+    "ruff==0.9.10",
+]
 
 [project.scripts]
 b2-photo-manager = "b2_photo_manager.app:run"
@@ -26,3 +32,6 @@ pythonpath = ["src"]
 [tool.ruff]
 target-version = "py312"
 line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B"]

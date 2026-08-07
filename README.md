@@ -1,30 +1,28 @@
 # B² Photo Manager
 
-Stabile Basisversion für macOS.
+Desktop photo selection workflow for event and product photography.
 
-## v0.1.0
-- Python 3.12
-- PySide6 6.8.3
-- Fotoordner auswählen
-- JPG/JPEG/PNG/WebP rekursiv laden
-- asynchrone Thumbnails
-- Auswahl per Klick
-- Auswahlzähler
-- Alles auswählen / Auswahl aufheben
-- Original per Doppelklick öffnen
-- Logging und Tests
+## Current version
 
-## Installation
+v0.2.0
+
+## Features
+
+- Recursive photo folder import
+- Asynchronous thumbnails
+- Manual selection
+- Large photo viewer
+- Keyboard navigation
+- Fit / 100% / 200% zoom
+- Selection directly from viewer
+
+## Development setup
+
 ```bash
-brew install python@3.12
-cd "/Users/benz/Documents/GitHub/Festival Photo Selector"
-rm -rf .venv
-/opt/homebrew/bin/python3.12 -m venv .venv
+python3.12 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
 python -m pip install -e ".[dev]"
+pytest
+ruff check .
 python app.py
 ```
-
-Tests: `pytest`
-Codeprüfung: `ruff check .`

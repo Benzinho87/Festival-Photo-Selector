@@ -1,5 +1,4 @@
 import logging
-import subprocess
 from pathlib import Path
 
 from PySide6.QtCore import QThreadPool, Qt
@@ -24,6 +23,7 @@ from b2_photo_manager.models.photo import Photo
 from b2_photo_manager.services.photo_finder import find_photos
 from b2_photo_manager.services.thumbnail_service import ThumbnailWorker
 from b2_photo_manager.ui.photo_card import PhotoCard
+from b2_photo_manager.ui.preview_dialog import PreviewDialog
 
 LOGGER = logging.getLogger(__name__)
 
@@ -66,9 +66,13 @@ class MainWindow(QMainWindow):
 
     def _build_content(self) -> None:
         self.heading = QLabel(CONFIG.app_name)
-        self.heading.setStyleSheet("font-size:26px; font-weight:600;")
+        self.heading.setStyleSheet(
+            "font-size:26px; font-weight:600;"
+        )
 
-        self.summary_label = QLabel("Wähle einen Ordner mit Fotos aus.")
+        self.summary_label = QLabel(
+            "Wähle einen Ordner mit Fotos aus."
+        )
 
         self.open_button = QPushButton("Fotoordner auswählen")
         self.open_button.clicked.connect(self.choose_folder)
@@ -85,7 +89,8 @@ class MainWindow(QMainWindow):
         self.grid_widget = QWidget()
         self.grid_layout = QGridLayout(self.grid_widget)
         self.grid_layout.setAlignment(
-            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
+            Qt.AlignmentFlag.AlignTop
+            | Qt.AlignmentFlag.AlignLeft
         )
         self.grid_layout.setHorizontalSpacing(14)
         self.grid_layout.setVerticalSpacing(14)
@@ -133,29 +138,48 @@ class MainWindow(QMainWindow):
             )
             return
 
-        LOGGER.info("Loading %d photos from %s", len(paths), selected)
+        LOGGER.info(
+            "Loading %d photos from %s",
+            len(paths),
+            selected,
+        )
         self.load_photos(paths)
 
     def load_photos(self, paths: list[Path]) -> None:
         self._clear_grid()
 
-        self.photos = [Photo(path=path) for path in paths]
+        self.photos = [
+            Photo(path=path)
+            for path in paths
+        ]
         self.cards = {}
         self.loaded_count = 0
 
         for index, photo in enumerate(self.photos):
             card = PhotoCard(photo)
-            card.selection_changed.connect(self._on_selection_changed)
-            card.open_requested.connect(self._open_original)
+            card.selection_changed.connect(
+                self._on_selection_changed
+            )
+            card.open_requested.connect(
+                self._open_preview
+            )
             self.cards[photo.path] = card
 
             row = index // CONFIG.thumbnail_columns
             column = index % CONFIG.thumbnail_columns
-            self.grid_layout.addWidget(card, row, column)
+            self.grid_layout.addWidget(
+                card,
+                row,
+                column,
+            )
 
             worker = ThumbnailWorker(photo.path)
-            worker.signals.loaded.connect(self._on_thumbnail_loaded)
-            worker.signals.failed.connect(self._on_thumbnail_failed)
+            worker.signals.loaded.connect(
+                self._on_thumbnail_loaded
+            )
+            worker.signals.failed.connect(
+                self._on_thumbnail_failed
+            )
             self.thread_pool.start(worker)
 
         self._update_status()
@@ -168,17 +192,31 @@ class MainWindow(QMainWindow):
             if widget is not None:
                 widget.deleteLater()
 
-    def _on_thumbnail_loaded(self, path: Path, image: QImage) -> None:
+    def _on_thumbnail_loaded(
+        self,
+        path: Path,
+        image: QImage,
+    ) -> None:
         card = self.cards.get(path)
 
         if card is not None:
-            card.set_thumbnail(QPixmap.fromImage(image))
+            card.set_thumbnail(
+                QPixmap.fromImage(image)
+            )
 
         self.loaded_count += 1
         self._update_status()
 
-    def _on_thumbnail_failed(self, path: Path, message: str) -> None:
-        LOGGER.warning("Thumbnail failed for %s: %s", path, message)
+    def _on_thumbnail_failed(
+        self,
+        path: Path,
+        message: str,
+    ) -> None:
+        LOGGER.warning(
+            "Thumbnail failed for %s: %s",
+            path,
+            message,
+        )
 
         card = self.cards.get(path)
 
@@ -188,11 +226,36 @@ class MainWindow(QMainWindow):
         self.loaded_count += 1
         self._update_status()
 
-    def _on_selection_changed(self, photo: Photo) -> None:
+    def _on_selection_changed(
+        self,
+        photo: Photo,
+    ) -> None:
         card = self.cards.get(photo.path)
 
         if card is not None:
             card.refresh_style()
+
+        self._update_status()
+
+    def _open_preview(self, path: Path) -> None:
+        start_index = next(
+            (
+                index
+                for index, photo in enumerate(self.photos)
+                if photo.path == path
+            ),
+            0,
+        )
+
+        dialog = PreviewDialog(
+            self.photos,
+            start_index,
+            self,
+        )
+        dialog.selection_changed.connect(
+            self._on_selection_changed
+        )
+        dialog.exec()
 
         self._update_status()
 
@@ -210,19 +273,11 @@ class MainWindow(QMainWindow):
 
         self._update_status()
 
-    def _open_original(self, path: Path) -> None:
-        try:
-            subprocess.run(["open", str(path)], check=True)
-        except Exception as exc:
-            LOGGER.exception("Could not open image")
-            QMessageBox.warning(
-                self,
-                "Bild konnte nicht geöffnet werden",
-                str(exc),
-            )
-
     def _update_status(self) -> None:
-        selected = sum(photo.selected for photo in self.photos)
+        selected = sum(
+            photo.selected
+            for photo in self.photos
+        )
         total = len(self.photos)
 
         self.summary_label.setText(
@@ -231,7 +286,7 @@ class MainWindow(QMainWindow):
 
         if total:
             message = (
-                f"Vorschaubilder geladen: "
+                "Vorschaubilder geladen: "
                 f"{self.loaded_count}/{total}"
             )
         else:

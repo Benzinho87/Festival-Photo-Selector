@@ -1,14 +1,16 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+
 @dataclass(frozen=True)
 class AppConfig:
     app_name: str = "B² Photo Manager"
-    version: str = "0.1.0"
+    version: str = "0.2.0"
     thumbnail_width: int = 240
     thumbnail_height: int = 170
     thumbnail_columns: int = 4
     default_photo_directory: Path = Path.home() / "Pictures"
     log_directory: Path = Path("logs")
+
 
 CONFIG = AppConfig()
