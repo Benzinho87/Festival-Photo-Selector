@@ -1,4 +1,4 @@
-from src.ui.main_window import run_app
+from b2_photo_manager.app import run
 
 if __name__ == "__main__":
-    raise SystemExit(run_app())
+    raise SystemExit(run())

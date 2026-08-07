@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 from pathlib import Path
 
-@dataclass
+@dataclass(slots=True)
 class Photo:
     path: Path
     selected: bool = False
