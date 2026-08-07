@@ -9,7 +9,7 @@ description = "Desktop photo selection and export workflow for events and produc
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 dependencies = [
-    "PySide6==6.8.3",
+    "PySide6==6.10.3",
     "Pillow==11.1.0",
 ]
 
