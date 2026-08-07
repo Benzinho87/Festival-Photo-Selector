@@ -26,13 +26,9 @@ class PhotoCard(QFrame):
 
         self.selection_label = QLabel()
         self.selection_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.selection_label.setMinimumWidth(92)
 
         self.name_label = QLabel(photo.path.name)
         self.name_label.setWordWrap(True)
-        self.name_label.setTextInteractionFlags(
-            Qt.TextInteractionFlag.NoTextInteraction
-        )
 
         meta_row = QHBoxLayout()
         meta_row.setContentsMargins(0, 0, 0, 0)
@@ -58,35 +54,23 @@ class PhotoCard(QFrame):
         )
 
     def set_error(self, message: str) -> None:
-        self.thumbnail_label.setText(f"Fehler\n{message}")
+        self.thumbnail_label.setText(f"Fehler\\n{message}")
 
     def refresh_style(self) -> None:
-        if self.photo.selected:
-            self.selection_label.setText("✓ Ausgewählt")
-            self.selection_label.setStyleSheet(
-                "font-weight: 600; padding: 3px 6px;"
-            )
-            self.setStyleSheet(
-                """
-                QFrame#PhotoCard {
-                    border: 3px solid #3ba55d;
-                    border-radius: 10px;
-                }
-                """
-            )
-        else:
-            self.selection_label.setText("Nicht ausgewählt")
-            self.selection_label.setStyleSheet(
-                "padding: 3px 6px;"
-            )
-            self.setStyleSheet(
-                """
-                QFrame#PhotoCard {
-                    border: 1px solid #777;
-                    border-radius: 10px;
-                }
-                """
-            )
+        self.selection_label.setText(
+            "✓ Ausgewählt" if self.photo.selected else "Nicht ausgewählt"
+        )
+
+        border = "3px solid #3ba55d" if self.photo.selected else "1px solid #777"
+
+        self.setStyleSheet(
+            f"""
+            QFrame#PhotoCard {{
+                border: {border};
+                border-radius: 10px;
+            }}
+            """
+        )
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
         if event.button() == Qt.MouseButton.LeftButton:

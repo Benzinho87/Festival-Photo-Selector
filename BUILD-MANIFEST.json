@@ -1,7 +1,0 @@
-{
-  "version": "0.1.0",
-  "python": ">=3.12,<3.13",
-  "pyside6": "6.8.3",
-  "pillow": "11.1.0",
-  "python_files_checked": 15
-}

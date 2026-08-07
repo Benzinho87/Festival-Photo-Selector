@@ -1,30 +1,35 @@
 # B² Photo Manager
 
-Desktop photo selection workflow for event and product photography.
+## Version 0.2.1.1 – Development Stability
 
-## Current version
+This release adds no new user-facing features. It stabilizes the local macOS development environment.
 
-v0.2.1
+### What is included
 
-## Features
+- Automatic Qt/Cocoa platform-plugin detection
+- Python 3.12 guard
+- `scripts/bootstrap.sh` for a clean local setup
+- `scripts/check.sh` for repeatable validation before commits
+- Duplicate-file detection for common Finder copies such as `file 2.py`
+- Fixed `src/` package layout
+- Existing v0.2.1 browser and viewer functionality
 
-- Recursive photo folder import
-- Asynchronous thumbnails
-- Responsive gallery layout
-- Manual selection with clear visual state
-- Browser filters: all / selected / unselected
-- Large photo viewer
-- Keyboard navigation
-- Fit / 100% / 200% zoom
-- Selection directly from viewer
-
-## Development setup
+### First setup
 
 ```bash
-python3.12 -m venv .venv
+chmod +x scripts/bootstrap.sh scripts/check.sh
+./scripts/bootstrap.sh
+```
+
+### Daily validation
+
+```bash
+./scripts/check.sh
+```
+
+### Start the app
+
+```bash
 source .venv/bin/activate
-python -m pip install -e ".[dev]"
-pytest
-ruff check .
 python app.py
 ```

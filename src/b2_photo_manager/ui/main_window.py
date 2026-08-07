@@ -110,8 +110,7 @@ class MainWindow(QMainWindow):
         self.grid_widget = QWidget()
         self.grid_layout = QGridLayout(self.grid_widget)
         self.grid_layout.setAlignment(
-            Qt.AlignmentFlag.AlignTop
-            | Qt.AlignmentFlag.AlignLeft
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft
         )
         self.grid_layout.setHorizontalSpacing(
             CONFIG.gallery_spacing
@@ -163,20 +162,12 @@ class MainWindow(QMainWindow):
             )
             return
 
-        LOGGER.info(
-            "Loading %d photos from %s",
-            len(paths),
-            selected,
-        )
         self.load_photos(paths)
 
     def load_photos(self, paths: list[Path]) -> None:
         self._clear_grid()
 
-        self.photos = [
-            Photo(path=path)
-            for path in paths
-        ]
+        self.photos = [Photo(path=path) for path in paths]
         self.cards = {}
         self.loaded_count = 0
         self.current_columns = 0
@@ -217,18 +208,10 @@ class MainWindow(QMainWindow):
         filter_name = self.filter_combo.currentText()
 
         if filter_name == FILTER_SELECTED:
-            return [
-                photo
-                for photo in self.photos
-                if photo.selected
-            ]
+            return [photo for photo in self.photos if photo.selected]
 
         if filter_name == FILTER_UNSELECTED:
-            return [
-                photo
-                for photo in self.photos
-                if not photo.selected
-            ]
+            return [photo for photo in self.photos if not photo.selected]
 
         return list(self.photos)
 
@@ -241,15 +224,12 @@ class MainWindow(QMainWindow):
             return
 
         card_width = CONFIG.thumbnail_width + 24
-        viewport_width = self.scroll.viewport().width()
         columns = calculate_columns(
-            viewport_width=viewport_width,
+            viewport_width=self.scroll.viewport().width(),
             card_width=card_width,
             spacing=CONFIG.gallery_spacing,
             minimum=CONFIG.thumbnail_min_columns,
         )
-
-        visible_photos = self._visible_photos()
 
         if not force and columns == self.current_columns:
             return
@@ -260,14 +240,12 @@ class MainWindow(QMainWindow):
         for card in self.cards.values():
             card.hide()
 
-        for index, photo in enumerate(visible_photos):
+        for index, photo in enumerate(self._visible_photos()):
             card = self.cards[photo.path]
-            row = index // columns
-            column = index % columns
             self.grid_layout.addWidget(
                 card,
-                row,
-                column,
+                index // columns,
+                index % columns,
             )
             card.show()
 

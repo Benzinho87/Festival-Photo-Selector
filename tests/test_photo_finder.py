@@ -15,19 +15,11 @@ def test_find_photos_recursively(tmp_path: Path) -> None:
 
     first.write_bytes(b"")
     second.write_bytes(b"")
-    ignored.write_text(
-        "ignore",
-        encoding="utf-8",
-    )
+    ignored.write_text("ignore", encoding="utf-8")
 
-    assert find_photos(tmp_path) == [
-        first,
-        second,
-    ]
+    assert find_photos(tmp_path) == [first, second]
 
 
-def test_find_photos_rejects_missing_folder(
-    tmp_path: Path,
-) -> None:
+def test_find_photos_rejects_missing_folder(tmp_path: Path) -> None:
     with pytest.raises(NotADirectoryError):
         find_photos(tmp_path / "missing")

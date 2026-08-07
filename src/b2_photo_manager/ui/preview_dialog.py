@@ -129,7 +129,7 @@ class PreviewDialog(QDialog):
             self.original_pixmap = None
             self.image_label.clear()
             self.image_label.setText(
-                f"Bild konnte nicht geladen werden:\n{exc}"
+                f"Bild konnte nicht geladen werden:\\n{exc}"
             )
 
         self._update_info()
@@ -170,9 +170,7 @@ class PreviewDialog(QDialog):
     def _update_info(self) -> None:
         photo = self.current_photo
         selection_state = (
-            "AUSGEWÄHLT"
-            if photo.selected
-            else "NICHT AUSGEWÄHLT"
+            "AUSGEWÄHLT" if photo.selected else "NICHT AUSGEWÄHLT"
         )
 
         zoom_text = (
@@ -183,28 +181,24 @@ class PreviewDialog(QDialog):
 
         self.info_label.setText(
             f"{self.index + 1} / {len(self.photos)} · "
-            f"{photo.path.name} · {selection_state} · {zoom_text}\n"
+            f"{photo.path.name} · {selection_state} · {zoom_text}\\n"
             "←/→ navigieren · Leertaste umschalten · "
             "F behalten · X abwählen · 0 Fit · 1 100 % · 2 200 %"
         )
 
         self.selection_button.setText(
-            "Auswahl aufheben"
-            if photo.selected
-            else "Auswählen"
+            "Auswahl aufheben" if photo.selected else "Auswählen"
         )
 
     def show_previous(self) -> None:
         if self.index == 0:
             return
-
         self.index -= 1
         self._load_current()
 
     def show_next(self) -> None:
         if self.index >= len(self.photos) - 1:
             return
-
         self.index += 1
         self._load_current()
 
@@ -216,20 +210,16 @@ class PreviewDialog(QDialog):
 
     def select_current(self) -> None:
         photo = self.current_photo
-
         if not photo.selected:
             photo.selected = True
             self.selection_changed.emit(photo)
-
         self._update_info()
 
     def reject_current(self) -> None:
         photo = self.current_photo
-
         if photo.selected:
             photo.selected = False
             self.selection_changed.emit(photo)
-
         self._update_info()
 
     def set_fit(self) -> None:
@@ -243,43 +233,7 @@ class PreviewDialog(QDialog):
         self._render_image()
         self._update_info()
 
-    def wheelEvent(self, event) -> None:
-        if event.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            delta = event.angleDelta().y()
-
-            if delta > 0:
-                self._zoom_step(1)
-            elif delta < 0:
-                self._zoom_step(-1)
-
-            event.accept()
-            return
-
-        super().wheelEvent(event)
-
-    def _zoom_step(self, direction: int) -> None:
-        current_index = 0
-
-        if not self.fit_to_window:
-            current_index = min(
-                range(len(self.ZOOM_LEVELS)),
-                key=lambda index: abs(
-                    self.ZOOM_LEVELS[index] - self.zoom_factor
-                ),
-            )
-
-        target_index = max(
-            0,
-            min(
-                len(self.ZOOM_LEVELS) - 1,
-                current_index + direction,
-            ),
-        )
-
-        self.set_zoom(self.ZOOM_LEVELS[target_index])
-
     def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
-
         if self.fit_to_window:
             self._render_image()
