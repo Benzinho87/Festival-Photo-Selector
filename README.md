@@ -1,35 +1,80 @@
 # B² Photo Manager
 
-## Version 0.2.1.1 – Development Stability
+## Version 0.2.2 – stabile Entwicklungsbasis + Favoriten & Tags
 
-This release adds no new user-facing features. It stabilizes the local macOS development environment.
+B² Photo Manager ist eine lokale Desktop-Anwendung für die schnelle Sichtung, Auswahl und spätere Aufbereitung großer Fotoordner.
 
-### What is included
+### Enthalten
 
-- Automatic Qt/Cocoa platform-plugin detection
-- Python 3.12 guard
-- `scripts/bootstrap.sh` for a clean local setup
-- `scripts/check.sh` for repeatable validation before commits
-- Duplicate-file detection for common Finder copies such as `file 2.py`
-- Fixed `src/` package layout
-- Existing v0.2.1 browser and viewer functionality
+- rekursives Einlesen von Fotoordnern
+- responsive Galerie mit Thumbnails
+- Auswahl / Abwahl von Fotos
+- Filter: Alle, Ausgewählt, Nicht ausgewählt, Favoriten
+- Favoriten per Stern
+- mehrere Tags pro Foto
+- Tag-Filter, kombinierbar mit dem Statusfilter
+- großer Viewer mit Navigation und Zoom
+- reproduzierbare Python-3.12-/PySide6-6.10.3-Umgebung
+- echte Qt/Cocoa-Prüfung vor jedem Testlauf
 
-### First setup
+## Entwicklungsumgebung
+
+Die virtuelle Umgebung liegt absichtlich **außerhalb des Repositories**:
+
+```text
+~/.local/share/b2-photo-manager/venv
+```
+
+Dadurch können iCloud/Finder/Git-Kopierkonflikte im Projektordner die Qt-Binärdateien nicht mehr beschädigen.
+
+Es wird **kein `pip install -e`** verwendet. Der lokale Code wird über `PYTHONPATH=src` gestartet.
+
+## Einmaliges Setup
 
 ```bash
-chmod +x scripts/bootstrap.sh scripts/check.sh
+chmod +x scripts/*.sh
 ./scripts/bootstrap.sh
 ```
 
-### Daily validation
+## App starten
+
+```bash
+./scripts/run.sh
+```
+
+Das Skript prüft die Umgebung. Ist sie beschädigt oder haben sich Abhängigkeiten geändert, wird sie automatisch neu erstellt.
+
+## Vor jedem Commit
 
 ```bash
 ./scripts/check.sh
 ```
 
-### Start the app
+Der Check prüft:
+
+1. Python 3.12
+2. Paketimport aus `src`
+3. echte Qt-/Cocoa-Initialisierung auf macOS
+4. Repository-Hygiene / Finder-Dubletten
+5. verdächtige Git-Referenz-Dubletten
+6. Ruff
+7. Pytest
+
+Nur wenn alle Prüfungen grün sind, wird committed.
+
+## Umgebung gezielt neu bauen
 
 ```bash
-source .venv/bin/activate
-python app.py
+./scripts/rebuild-env.sh
 ```
+
+Das entfernt auch eine eventuell noch vorhandene alte `.venv` aus dem Repository und baut die externe Umgebung neu auf.
+
+## Arbeitsweise
+
+- Ein Feature = ein Commit.
+- Vor jedem Commit: `./scripts/check.sh`.
+- Keine kompletten Projektordner über bestehende Ordner kopieren.
+- Keine `.venv` in Git oder im Projektordner.
+- Änderungen werden als Git-Patch oder über Git vorgenommen.
+- Das Repository sollte möglichst nicht in einem durch iCloud synchronisierten `Documents`-Ordner liegen.

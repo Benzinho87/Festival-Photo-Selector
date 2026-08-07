@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "b2-photo-manager"
-version = "0.2.1.1"
+version = "0.2.2"
 description = "Desktop photo selection and export workflow for events and product photography."
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
@@ -18,9 +18,6 @@ dev = [
     "pytest==8.3.5",
     "ruff==0.9.10",
 ]
-
-[project.scripts]
-b2-photo-manager = "b2_photo_manager.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

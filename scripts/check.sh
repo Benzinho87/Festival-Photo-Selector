@@ -1,85 +1,62 @@
-#!/bin/zsh
+#!/bin/bash
 set -e
 
-PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+source "$(cd "$(dirname "$0")" && pwd)/common.sh"
 cd "$PROJECT_ROOT"
 
-export PYTHONPATH="$PROJECT_ROOT/src${PYTHONPATH:+:$PYTHONPATH}"
+ensure_environment
+export_project_pythonpath
 
 echo "B² Photo Manager – Projektprüfung"
 
-if [ ! -x ".venv/bin/python" ]; then
-  echo "Fehler: .venv fehlt. Bitte zuerst ./scripts/bootstrap.sh ausführen."
-  exit 1
-fi
-
-source .venv/bin/activate
-
 echo "1/7 Python"
-python -c '
-import sys
-assert sys.version_info[:2] == (3, 12), sys.version
-print(sys.version.split()[0])
-'
+"$VENV_PYTHON" -c 'import sys; assert sys.version_info[:2] == (3, 12); print(sys.version.split()[0])'
 
 echo "2/7 Paketimport"
-python -c '
-import b2_photo_manager
-print(b2_photo_manager.__file__)
-'
+"$VENV_PYTHON" -c 'import b2_photo_manager; print(b2_photo_manager.__file__)'
 
-echo "3/7 PySide6 / Cocoa"
-python -c '
-from pathlib import Path
-import PySide6
-
-root = Path(PySide6.__file__).resolve().parent
-candidates = [
-    root / "Qt" / "plugins" / "platforms" / "libqcocoa.dylib",
-    root / "plugins" / "platforms" / "libqcocoa.dylib",
-]
-
-existing = [path for path in candidates if path.exists()]
-assert existing, "libqcocoa.dylib wurde nicht gefunden"
-print(existing[0])
-'
-
-echo "4/7 Projekt-Dubletten"
-PROJECT_DUPLICATES="$(find src tests -type f \( \
-  -name "* 2.py" -o \
-  -name "* 3.py" -o \
-  -name "* copy.py" \
-\) 2>/dev/null || true)"
-
-if [ -n "$PROJECT_DUPLICATES" ]; then
-  echo "Fehler: Verdächtige Projekt-Dubletten gefunden:"
-  echo "$PROJECT_DUPLICATES"
-  exit 1
+echo "3/7 Qt Runtime"
+if [[ "$OSTYPE" == darwin* ]]; then
+  "$VENV_PYTHON" - <<'PY'
+from PySide6.QtWidgets import QApplication
+app = QApplication([])
+platform = app.platformName()
+print("Qt-Plattform:", platform)
+assert platform == "cocoa", f"Erwartet cocoa, erhalten: {platform}"
+PY
+else
+  "$VENV_PYTHON" -c 'import PySide6; print("PySide6:", PySide6.__version__)'
 fi
 
-echo "Keine Projekt-Dubletten gefunden"
+echo "4/7 Repository-Hygiene"
+BAD_FILES="$(find src tests scripts -type f \( -name '._*' -o -name '* 2.py' -o -name '* 3.py' -o -name '* copy.py' \) -print 2>/dev/null || true)"
+if [ -n "$BAD_FILES" ]; then
+  echo "Fehler: Verdächtige Dubletten/AppleDouble-Dateien gefunden:"
+  echo "$BAD_FILES"
+  exit 1
+fi
+if [ -d "$PROJECT_ROOT/.venv" ]; then
+  echo "Fehler: .venv liegt im Repository. Bitte ./scripts/rebuild-env.sh ausführen."
+  exit 1
+fi
+echo "Repository sauber"
 
 echo "5/7 Git-Referenzen"
-GIT_DUPLICATES="$(find .git/refs -type f \( \
-  -name "* 2" -o \
-  -name "* 3" -o \
-  -name "* 2.lock" -o \
-  -name "* 3.lock" \
-\) 2>/dev/null || true)"
-
-if [ -n "$GIT_DUPLICATES" ]; then
-  echo "Fehler: Verdächtige Git-Dubletten gefunden:"
-  echo "$GIT_DUPLICATES"
-  exit 1
+if [ -d .git/refs ]; then
+  GIT_DUPLICATES="$(find .git/refs -type f \( -name '* 2' -o -name '* 3' -o -name '* 2.lock' -o -name '* 3.lock' \) -print 2>/dev/null || true)"
+  if [ -n "$GIT_DUPLICATES" ]; then
+    echo "Fehler: Verdächtige Git-Dubletten gefunden:"
+    echo "$GIT_DUPLICATES"
+    exit 1
+  fi
 fi
-
 echo "Git-Referenzen sauber"
 
 echo "6/7 Ruff"
-ruff check .
+"$VENV_PYTHON" -m ruff check .
 
 echo "7/7 Pytest"
-pytest
+"$VENV_PYTHON" -m pytest
 
 echo
 echo "Alle Prüfungen bestanden."

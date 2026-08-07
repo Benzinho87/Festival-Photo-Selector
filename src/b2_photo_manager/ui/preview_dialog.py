@@ -16,6 +16,7 @@ from b2_photo_manager.models.photo import Photo
 
 class PreviewDialog(QDialog):
     selection_changed = Signal(object)
+    favorite_changed = Signal(object)
 
     ZOOM_LEVELS = (1.0, 2.0, 4.0)
 
@@ -65,6 +66,9 @@ class PreviewDialog(QDialog):
         self.selection_button = QPushButton()
         self.selection_button.clicked.connect(self.toggle_selection)
 
+        self.favorite_button = QPushButton()
+        self.favorite_button.clicked.connect(self.toggle_favorite)
+
         controls = QHBoxLayout()
         controls.addWidget(previous_button)
         controls.addWidget(next_button)
@@ -73,6 +77,7 @@ class PreviewDialog(QDialog):
         controls.addWidget(zoom_100_button)
         controls.addWidget(zoom_200_button)
         controls.addStretch()
+        controls.addWidget(self.favorite_button)
         controls.addWidget(self.selection_button)
 
         layout = QVBoxLayout(self)
@@ -172,22 +177,26 @@ class PreviewDialog(QDialog):
         selection_state = (
             "AUSGEWÄHLT" if photo.selected else "NICHT AUSGEWÄHLT"
         )
+        favorite_state = "★ FAVORIT" if photo.favorite else "☆ KEIN FAVORIT"
 
         zoom_text = (
             "Fit"
-            if self.fit_to_window
+            if self.fit_to_windowqwie
             else f"{int(self.zoom_factor * 100)} %"
         )
 
         self.info_label.setText(
             f"{self.index + 1} / {len(self.photos)} · "
-            f"{photo.path.name} · {selection_state} · {zoom_text}\\n"
+            f"{photo.path.name} · {selection_state} · {favorite_state} · {zoom_text}\n"
             "←/→ navigieren · Leertaste umschalten · "
             "F behalten · X abwählen · 0 Fit · 1 100 % · 2 200 %"
         )
 
         self.selection_button.setText(
             "Auswahl aufheben" if photo.selected else "Auswählen"
+        )
+        self.favorite_button.setText(
+            "★ Favorit entfernen" if photo.favorite else "☆ Als Favorit markieren"
         )
 
     def show_previous(self) -> None:
@@ -206,6 +215,12 @@ class PreviewDialog(QDialog):
         photo = self.current_photo
         photo.selected = not photo.selected
         self.selection_changed.emit(photo)
+        self._update_info()
+
+    def toggle_favorite(self) -> None:
+        photo = self.current_photo
+        photo.favorite = not photo.favorite
+        self.favorite_changed.emit(photo)
         self._update_info()
 
     def select_current(self) -> None:
