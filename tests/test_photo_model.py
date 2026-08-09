@@ -8,6 +8,7 @@ def test_photo_defaults() -> None:
     assert photo.selected is False
     assert photo.favorite is False
     assert photo.tags == set()
+    assert photo.photographer is None
 
 
 def test_photo_tags_are_independent() -> None:

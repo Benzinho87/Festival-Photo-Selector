@@ -1,6 +1,6 @@
 # B² Photo Manager
 
-## Version 0.2.2 – stabile Entwicklungsbasis + Favoriten & Tags
+## Version 0.3.0 – professioneller Viewer
 
 B² Photo Manager ist eine lokale Desktop-Anwendung für die schnelle Sichtung, Auswahl und spätere Aufbereitung großer Fotoordner.
 
@@ -13,7 +13,11 @@ B² Photo Manager ist eine lokale Desktop-Anwendung für die schnelle Sichtung, 
 - Favoriten per Stern
 - mehrere Tags pro Foto
 - Tag-Filter, kombinierbar mit dem Statusfilter
-- großer Viewer mit Navigation und Zoom
+- aufgeräumter großer Viewer mit Pfeiltasten-Navigation
+- sichtbare EXIF-Basisdaten inklusive Fotograf/Autor, Kamera und Aufnahmedaten
+- Dateiname, Abmessungen und Dateigröße im Viewer
+- Zoom per Fit, 100 %, 200 % sowie Mausrad/Trackpad
+- synchroner Auswahl- und Favoritenstatus zwischen Viewer und Übersicht
 - reproduzierbare Python-3.12-/PySide6-6.10.3-Umgebung
 - echte Qt/Cocoa-Prüfung vor jedem Testlauf
 
