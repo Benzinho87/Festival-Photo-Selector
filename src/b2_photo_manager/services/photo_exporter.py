@@ -6,7 +6,13 @@ from pathlib import Path
 from PIL import Image, ImageOps
 
 from b2_photo_manager.models.photo import Photo
-from b2_photo_manager.services.export_presets import ExportFormat, ExportPreset, ResizeMode
+from b2_photo_manager.services.export_presets import (
+    ExportFormat,
+    ExportPreset,
+    FilenameMode,
+    ResizeMode,
+)
+from b2_photo_manager.services.photo_metadata import read_photo_metadata
 
 ProgressCallback = Callable[[int, int, Path], None]
 
@@ -50,9 +56,21 @@ def build_export_filename(
     number: int,
     padding: int,
     output_format: ExportFormat,
+    source: Path | None = None,
+    mode: FilenameMode = FilenameMode.PREFIX_NUMBER,
+    photographer: str | None = None,
 ) -> str:
-    safe_prefix = "_".join(prefix.strip().split()) or "export"
-    return f"{safe_prefix}_{number:0{max(padding, 1)}d}.{output_format.value}"
+    number_part = f"{number:0{max(padding, 1)}d}"
+    if mode == FilenameMode.ORIGINAL_NUMBER and source is not None:
+        base = source.stem
+    else:
+        base = prefix
+
+    parts = [_filename_part(base) or "export"]
+    if photographer:
+        parts.append(_filename_part(photographer))
+    parts.append(number_part)
+    return f"{'_'.join(part for part in parts if part)}.{output_format.value}"
 
 
 def export_photos(
@@ -77,6 +95,9 @@ def export_photos(
                     normalized.start_number + index - 1,
                     normalized.number_padding,
                     normalized.output_format,
+                    source=photo.path,
+                    mode=normalized.filename_mode,
+                    photographer=_photographer_for_filename(photo, normalized),
                 ),
             )
             bytes_written = _export_one(photo.path, destination, normalized)
@@ -101,6 +122,23 @@ def export_photos(
     if progress_callback is not None:
         progress_callback(len(photo_list), len(photo_list), destination_folder)
     return ExportSummary(destination_folder=destination_folder, results=tuple(results))
+
+
+def _filename_part(value: str) -> str:
+    normalized = "_".join(value.strip().split())
+    allowed = [char if char.isalnum() or char in "-_" else "_" for char in normalized]
+    return "_".join("".join(allowed).split("_"))
+
+
+def _photographer_for_filename(photo: Photo, preset: ExportPreset) -> str | None:
+    if not preset.include_photographer:
+        return None
+    if photo.photographer:
+        return photo.photographer
+    try:
+        return read_photo_metadata(photo.path).photographer
+    except Exception:
+        return None
 
 
 def _next_available_destination(destination_folder: Path, filename: str) -> Path:

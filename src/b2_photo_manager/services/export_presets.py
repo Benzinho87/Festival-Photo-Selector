@@ -12,6 +12,11 @@ class ResizeMode(StrEnum):
     BOUNDING_BOX = "bounding_box"
 
 
+class FilenameMode(StrEnum):
+    PREFIX_NUMBER = "prefix_number"
+    ORIGINAL_NUMBER = "original_number"
+
+
 @dataclass(frozen=True, slots=True)
 class ExportPreset:
     key: str
@@ -24,8 +29,10 @@ class ExportPreset:
     quality: int
     keep_metadata: bool
     filename_prefix: str
+    filename_mode: FilenameMode
     start_number: int
     number_padding: int
+    include_photographer: bool = False
     target_size_kb: int | None = None
 
     def normalized(self) -> "ExportPreset":
@@ -37,6 +44,7 @@ class ExportPreset:
             long_edge=self.long_edge if self.long_edge and self.long_edge > 0 else None,
             max_width=self.max_width if self.max_width and self.max_width > 0 else None,
             max_height=self.max_height if self.max_height and self.max_height > 0 else None,
+            filename_mode=FilenameMode(self.filename_mode),
             target_size_kb=self.target_size_kb
             if self.target_size_kb and self.target_size_kb > 0
             else None,
@@ -55,8 +63,10 @@ EXPORT_PRESETS: tuple[ExportPreset, ...] = (
         quality=82,
         keep_metadata=False,
         filename_prefix="website",
+        filename_mode=FilenameMode.PREFIX_NUMBER,
         start_number=1,
         number_padding=3,
+        include_photographer=False,
         target_size_kb=500,
     ),
     ExportPreset(
@@ -70,8 +80,10 @@ EXPORT_PRESETS: tuple[ExportPreset, ...] = (
         quality=78,
         keep_metadata=False,
         filename_prefix="thumb",
+        filename_mode=FilenameMode.PREFIX_NUMBER,
         start_number=1,
         number_padding=3,
+        include_photographer=False,
     ),
     ExportPreset(
         key="social",
@@ -84,8 +96,10 @@ EXPORT_PRESETS: tuple[ExportPreset, ...] = (
         quality=88,
         keep_metadata=False,
         filename_prefix="social",
+        filename_mode=FilenameMode.PREFIX_NUMBER,
         start_number=1,
         number_padding=3,
+        include_photographer=False,
     ),
     ExportPreset(
         key="reduced_original",
@@ -98,8 +112,10 @@ EXPORT_PRESETS: tuple[ExportPreset, ...] = (
         quality=92,
         keep_metadata=True,
         filename_prefix="export",
+        filename_mode=FilenameMode.ORIGINAL_NUMBER,
         start_number=1,
         number_padding=3,
+        include_photographer=False,
     ),
     ExportPreset(
         key="custom",
@@ -112,8 +128,10 @@ EXPORT_PRESETS: tuple[ExportPreset, ...] = (
         quality=85,
         keep_metadata=False,
         filename_prefix="custom",
+        filename_mode=FilenameMode.PREFIX_NUMBER,
         start_number=1,
         number_padding=3,
+        include_photographer=False,
     ),
 )
 

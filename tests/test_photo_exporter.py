@@ -3,7 +3,12 @@ from pathlib import Path
 from PIL import Image
 
 from b2_photo_manager.models.photo import Photo
-from b2_photo_manager.services.export_presets import ExportFormat, ExportPreset, ResizeMode
+from b2_photo_manager.services.export_presets import (
+    ExportFormat,
+    ExportPreset,
+    FilenameMode,
+    ResizeMode,
+)
 from b2_photo_manager.services.photo_exporter import (
     build_export_filename,
     export_photos,
@@ -23,8 +28,10 @@ def _preset(**overrides) -> ExportPreset:
         "quality": 85,
         "keep_metadata": False,
         "filename_prefix": "event",
+        "filename_mode": FilenameMode.PREFIX_NUMBER,
         "start_number": 1,
         "number_padding": 3,
+        "include_photographer": False,
         "target_size_kb": None,
     }
     values.update(overrides)
@@ -52,6 +59,31 @@ def test_exportable_photos_uses_selection_and_optional_favorites() -> None:
 
 def test_build_export_filename_uses_prefix_number_padding_and_format() -> None:
     assert build_export_filename("My Event", 7, 4, ExportFormat.WEBP) == "My_Event_0007.webp"
+
+
+def test_build_export_filename_can_keep_original_name() -> None:
+    filename = build_export_filename(
+        "ignored",
+        12,
+        3,
+        ExportFormat.JPG,
+        source=Path("IMG 1234.JPG"),
+        mode=FilenameMode.ORIGINAL_NUMBER,
+    )
+
+    assert filename == "IMG_1234_012.jpg"
+
+
+def test_build_export_filename_can_include_photographer() -> None:
+    filename = build_export_filename(
+        "website",
+        3,
+        2,
+        ExportFormat.WEBP,
+        photographer="Erika Musterfrau",
+    )
+
+    assert filename == "website_Erika_Musterfrau_03.webp"
 
 
 def test_export_resizes_and_does_not_overwrite_existing_files(tmp_path: Path) -> None:
@@ -115,3 +147,16 @@ def test_export_target_size_reduces_large_files(tmp_path: Path) -> None:
 
     assert summary.successful_count == 1
     assert summary.results[0].bytes_written <= 8 * 1024
+
+
+def test_export_can_include_metadata_photographer_in_filename(tmp_path: Path) -> None:
+    source = tmp_path / "source.jpg"
+    _image(source, exif_author="Erika Musterfrau")
+
+    export_photos(
+        [Photo(source, selected=True)],
+        tmp_path / "exports",
+        _preset(include_photographer=True),
+    )
+
+    assert (tmp_path / "exports" / "event_Erika_Musterfrau_001.jpg").exists()

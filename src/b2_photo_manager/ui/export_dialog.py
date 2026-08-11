@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QSettings, Qt
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -21,6 +21,7 @@ from b2_photo_manager.models.photo import Photo
 from b2_photo_manager.services.export_presets import (
     ExportFormat,
     ExportPreset,
+    FilenameMode,
     ResizeMode,
     presets_by_name,
 )
@@ -33,6 +34,7 @@ class ExportDialog(QDialog):
         super().__init__(parent)
         self.photos = photos
         self.presets = presets_by_name()
+        self.settings = QSettings("B2", "Photo Manager")
         self.setWindowTitle("Fotos exportieren")
         self.setMinimumWidth(520)
 
@@ -58,6 +60,12 @@ class ExportDialog(QDialog):
         self.quality_spin = self._spinbox(1, 100)
         self.keep_metadata_check = QCheckBox("Metadaten behalten")
         self.prefix_edit = QLineEdit()
+        self.filename_mode_combo = QComboBox()
+        self.filename_mode_combo.addItem("Prefix + Nummer", FilenameMode.PREFIX_NUMBER.value)
+        self.filename_mode_combo.addItem(
+            "Original-Dateiname + Nummer", FilenameMode.ORIGINAL_NUMBER.value
+        )
+        self.include_photographer_check = QCheckBox("Fotograf / Urheber in Dateinamen aufnehmen")
         self.start_number_spin = self._spinbox(0, 999999)
         self.padding_spin = self._spinbox(1, 8)
         self.target_size_spin = self._spinbox(0, 50000, " KB")
@@ -90,7 +98,9 @@ class ExportDialog(QDialog):
         form.addRow("Max. Höhe", self.max_height_spin)
         form.addRow("Qualität", self.quality_spin)
         form.addRow("", self.keep_metadata_check)
+        form.addRow("Dateiname", self.filename_mode_combo)
         form.addRow("Datei-Prefix", self.prefix_edit)
+        form.addRow("", self.include_photographer_check)
         form.addRow("Startnummer", self.start_number_spin)
         form.addRow("Führende Nullen", self.padding_spin)
         form.addRow("Zielgröße pro Bild", self.target_size_spin)
@@ -108,6 +118,7 @@ class ExportDialog(QDialog):
         layout.addLayout(buttons)
 
         self._apply_preset(self.preset_combo.currentText())
+        self._load_last_settings()
 
     def _spinbox(self, minimum: int, maximum: int, suffix: str = "") -> QSpinBox:
         spinbox = QSpinBox()
@@ -127,6 +138,10 @@ class ExportDialog(QDialog):
         self.quality_spin.setValue(preset.quality)
         self.keep_metadata_check.setChecked(preset.keep_metadata)
         self.prefix_edit.setText(preset.filename_prefix)
+        self.filename_mode_combo.setCurrentIndex(
+            self.filename_mode_combo.findData(preset.filename_mode.value)
+        )
+        self.include_photographer_check.setChecked(preset.include_photographer)
         self.start_number_spin.setValue(preset.start_number)
         self.padding_spin.setValue(preset.number_padding)
         self.target_size_spin.setValue(preset.target_size_kb or 0)
@@ -168,10 +183,24 @@ class ExportDialog(QDialog):
             quality=self.quality_spin.value(),
             keep_metadata=self.keep_metadata_check.isChecked(),
             filename_prefix=self.prefix_edit.text(),
+            filename_mode=FilenameMode(self.filename_mode_combo.currentData()),
             start_number=self.start_number_spin.value(),
             number_padding=self.padding_spin.value(),
+            include_photographer=self.include_photographer_check.isChecked(),
             target_size_kb=self.target_size_spin.value() or None,
         )
+
+    def _load_last_settings(self) -> None:
+        preset_name = self.settings.value("export/last_preset", "", str)
+        if preset_name in self.presets:
+            self.preset_combo.setCurrentText(preset_name)
+        destination = self.settings.value("export/last_destination", "", str)
+        if destination:
+            self.destination_edit.setText(destination)
+
+    def _save_last_settings(self) -> None:
+        self.settings.setValue("export/last_preset", self.preset_combo.currentText())
+        self.settings.setValue("export/last_destination", self.destination_edit.text())
 
     def _run_export(self) -> None:
         photos = self._selected_photos()
@@ -194,16 +223,30 @@ class ExportDialog(QDialog):
             self._preset_from_form(),
             progress_callback=lambda done, total, _path: self.progress.setValue(done),
         )
+        self._save_last_settings()
         self.progress.setValue(len(photos))
         self.export_button.setEnabled(True)
 
-        QMessageBox.information(
-            self,
-            "Export abgeschlossen",
-            (
-                f"{summary.successful_count} Fotos exportiert\n"
-                f"{summary.error_count} Fehler\n"
-                f"Gesamtgröße: {format_file_size(summary.total_size)}\n"
-                f"Zielordner: {summary.destination_folder}"
-            ),
+        message = QMessageBox(self)
+        message.setIcon(QMessageBox.Icon.Information)
+        message.setWindowTitle("Export abgeschlossen")
+        message.setText(
+            f"{summary.successful_count} Fotos exportiert\n"
+            f"{summary.error_count} Fehler\n"
+            f"Gesamtgröße: {format_file_size(summary.total_size)}\n"
+            f"Zielordner: {summary.destination_folder}"
         )
+        message.setDetailedText(self._summary_details(summary))
+        message.exec()
+
+    def _summary_details(self, summary) -> str:
+        rows = []
+        for result in summary.results:
+            if result.success and result.destination is not None:
+                rows.append(
+                    f"OK: {result.source.name} -> {result.destination.name} "
+                    f"({format_file_size(result.bytes_written)})"
+                )
+            else:
+                rows.append(f"FEHLER: {result.source.name} -> {result.error}")
+        return "\n".join(rows)
