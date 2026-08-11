@@ -32,6 +32,7 @@ from b2_photo_manager.services.photo_filter import (
 )
 from b2_photo_manager.services.photo_finder import find_photos
 from b2_photo_manager.services.thumbnail_service import ThumbnailWorker
+from b2_photo_manager.ui.export_dialog import ExportDialog
 from b2_photo_manager.ui.photo_card import PhotoCard
 from b2_photo_manager.ui.preview_dialog import PreviewDialog
 from b2_photo_manager.ui.tag_dialog import TagDialog
@@ -72,6 +73,11 @@ class MainWindow(QMainWindow):
         clear_action = QAction("Auswahl aufheben", self)
         clear_action.triggered.connect(self.clear_selection)
         toolbar.addAction(clear_action)
+        toolbar.addSeparator()
+
+        export_action = QAction("Exportieren", self)
+        export_action.triggered.connect(self.open_export_dialog)
+        toolbar.addAction(export_action)
 
     def _build_content(self) -> None:
         self.heading = QLabel(CONFIG.app_name)
@@ -276,6 +282,20 @@ class MainWindow(QMainWindow):
             self.cards[photo.path].refresh_style()
         self._relayout_gallery(force=True)
         self._update_status()
+
+    def open_export_dialog(self) -> None:
+        if not self.photos:
+            QMessageBox.information(
+                self, "Keine Fotos geladen", "Bitte zuerst einen Fotoordner auswählen."
+            )
+            return
+        if not any(photo.selected for photo in self.photos):
+            QMessageBox.information(
+                self, "Keine Auswahl", "Bitte zuerst Fotos für den Export auswählen."
+            )
+            return
+        dialog = ExportDialog(self.photos, self)
+        dialog.exec()
 
     def _update_status(self) -> None:
         total = len(self.photos)
