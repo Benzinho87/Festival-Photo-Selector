@@ -195,8 +195,12 @@ class PreviewDialog(QDialog):
 
     def _metadata_text(self) -> str:
         photo = self.current_photo
+        ai_rows = self._ai_rows(photo)
         if self.metadata is None:
-            return f"<b>{photo.path.name}</b><br><br>Keine Metadaten verfügbar"
+            return (
+                f"<b>{photo.path.name}</b><br><br>Keine Metadaten verfügbar"
+                f"{ai_rows}"
+            )
         data = self.metadata
         rows = [
             ("Datei", photo.path.name),
@@ -214,7 +218,32 @@ class PreviewDialog(QDialog):
             ("ISO", str(data.iso) if data.iso is not None else "–"),
             ("Brennweite", data.focal_length or "–"),
         ]
-        return "<br>".join(f"<b>{label}</b><br>{value}" for label, value in rows)
+        return "<br>".join(f"<b>{label}</b><br>{value}" for label, value in rows) + ai_rows
+
+    def _ai_rows(self, photo: Photo) -> str:
+        if photo.ai_analysis is None:
+            return "<br><br><b>AI</b><br>Noch nicht analysiert"
+        result = photo.ai_analysis
+        reasons = ", ".join(result.reasons)
+        return (
+            "<br><br><b>AI-Empfehlung</b><br>"
+            f"{photo.ai_score or 0.0:.0%} · {photo.ai_recommendation or result.recommendation}"
+            f"<br><b>AI-Auswahl</b><br>{'Ja' if photo.ai_selected else 'Nein'}"
+            f"<br><b>Auswahlgrund</b><br>{photo.selection_reason or '–'}"
+            f"<br><b>Serie</b><br>{photo.series_id or '–'}"
+            f" · Rang {photo.series_rank or '–'}"
+            f"<br><b>Review</b><br>{photo.review_status}"
+            f"<br><b>Manuelle Änderung</b><br>{photo.manual_change or '–'}"
+            "<br><b>Teil-Scores</b><br>"
+            f"Technik {result.technical.overall:.0%} · "
+            f"Schärfe {result.technical.sharpness:.0%} · "
+            f"Belichtung {result.technical.exposure:.0%} · "
+            f"Clipping {result.technical.clipping:.0%} · "
+            f"Kontrast {result.technical.contrast:.0%} · "
+            f"Ästhetik {result.aesthetic.overall:.0%} · "
+            f"Menschen {result.people.overall:.0%}"
+            f"<br><b>Positive/negative Gründe</b><br>{reasons or '–'}"
+        )
 
     def _update_info(self) -> None:
         photo = self.current_photo
@@ -240,6 +269,7 @@ class PreviewDialog(QDialog):
 
     def toggle_selection(self) -> None:
         self.current_photo.selected = not self.current_photo.selected
+        self.current_photo.review_status = "kept" if self.current_photo.selected else "removed"
         self.selection_changed.emit(self.current_photo)
         self._update_info()
 
@@ -251,12 +281,14 @@ class PreviewDialog(QDialog):
     def select_current(self) -> None:
         if not self.current_photo.selected:
             self.current_photo.selected = True
+            self.current_photo.review_status = "kept"
             self.selection_changed.emit(self.current_photo)
         self._update_info()
 
     def reject_current(self) -> None:
         if self.current_photo.selected:
             self.current_photo.selected = False
+            self.current_photo.review_status = "removed"
             self.selection_changed.emit(self.current_photo)
         self._update_info()
 

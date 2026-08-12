@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSpinBox,
     QStatusBar,
     QToolBar,
     QVBoxLayout,
@@ -21,16 +22,33 @@ from PySide6.QtWidgets import (
 
 from b2_photo_manager.config import CONFIG
 from b2_photo_manager.models.photo import Photo
+from b2_photo_manager.services.ai.models import SelectionProfile, SelectionRequest, SelectionTarget
+from b2_photo_manager.services.ai.worker import SelectionWorker
 from b2_photo_manager.services.gallery_layout import calculate_columns
 from b2_photo_manager.services.photo_filter import (
     ALL_TAGS,
+    FILTER_AI_SCORE_70,
+    FILTER_AI_SELECTED,
+    FILTER_AI_UNSELECTED,
     FILTER_ALL,
     FILTER_FAVORITES,
+    FILTER_MANUAL_CHANGED,
+    FILTER_REVIEW_REVIEWED,
+    FILTER_REVIEW_UNREVIEWED,
     FILTER_SELECTED,
+    FILTER_SERIES,
     FILTER_UNSELECTED,
     filter_photos,
 )
 from b2_photo_manager.services.photo_finder import find_photos
+from b2_photo_manager.services.review import (
+    ReviewHistory,
+    apply_series_groups,
+    mark_review_decision,
+    quality_warnings,
+    review_progress,
+    save_project_state,
+)
 from b2_photo_manager.services.thumbnail_service import ThumbnailWorker
 from b2_photo_manager.ui.export_dialog import ExportDialog
 from b2_photo_manager.ui.photo_card import PhotoCard
@@ -48,6 +66,11 @@ class MainWindow(QMainWindow):
         self.loaded_count = 0
         self.current_columns = 0
         self.thread_pool = QThreadPool.globalInstance()
+        self.selection_worker: SelectionWorker | None = None
+        self.analysis_running = False
+        self.series = ()
+        self.manual_corrections = []
+        self.history = ReviewHistory()
 
         self.setWindowTitle(f"{CONFIG.app_name} {CONFIG.version}")
         self.resize(1200, 820)
@@ -78,6 +101,19 @@ class MainWindow(QMainWindow):
         export_action = QAction("Exportieren", self)
         export_action.triggered.connect(self.open_export_dialog)
         toolbar.addAction(export_action)
+        toolbar.addSeparator()
+
+        review_action = QAction("Review-Modus", self)
+        review_action.triggered.connect(self.open_review_mode)
+        toolbar.addAction(review_action)
+
+        undo_action = QAction("Undo", self)
+        undo_action.triggered.connect(self.undo)
+        toolbar.addAction(undo_action)
+
+        redo_action = QAction("Redo", self)
+        redo_action.triggered.connect(self.redo)
+        toolbar.addAction(redo_action)
 
     def _build_content(self) -> None:
         self.heading = QLabel(CONFIG.app_name)
@@ -89,9 +125,40 @@ class MainWindow(QMainWindow):
 
         self.filter_combo = QComboBox()
         self.filter_combo.addItems(
-            [FILTER_ALL, FILTER_SELECTED, FILTER_UNSELECTED, FILTER_FAVORITES]
+            [
+                FILTER_ALL,
+                FILTER_SELECTED,
+                FILTER_UNSELECTED,
+                FILTER_FAVORITES,
+                FILTER_AI_SELECTED,
+                FILTER_AI_UNSELECTED,
+                FILTER_AI_SCORE_70,
+                FILTER_REVIEW_UNREVIEWED,
+                FILTER_REVIEW_REVIEWED,
+                FILTER_MANUAL_CHANGED,
+                FILTER_SERIES,
+            ]
         )
         self.filter_combo.currentTextChanged.connect(self._apply_filter)
+
+        self.sort_combo = QComboBox()
+        self.sort_combo.addItems(["Dateiname", "AI-Score", "Review-Status", "Aufnahmedatum"])
+        self.sort_combo.currentTextChanged.connect(self._apply_filter)
+
+        self.profile_combo = QComboBox()
+        self.profile_combo.addItems([profile.value for profile in SelectionProfile])
+
+        self.target_spin = QSpinBox()
+        self.target_spin.setRange(1, 3000)
+        self.target_spin.setValue(80)
+        self.target_spin.setSuffix(" Fotos")
+
+        self.ai_button = QPushButton("AI-Auswahl starten")
+        self.ai_button.clicked.connect(self.start_ai_selection)
+
+        self.cancel_ai_button = QPushButton("Abbrechen")
+        self.cancel_ai_button.clicked.connect(self.cancel_ai_selection)
+        self.cancel_ai_button.setEnabled(False)
 
         self.tag_filter_combo = QComboBox()
         self.tag_filter_combo.addItem(ALL_TAGS)
@@ -109,6 +176,17 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.filter_combo)
         controls.addWidget(QLabel("Tag:"))
         controls.addWidget(self.tag_filter_combo)
+        controls.addWidget(QLabel("Sortierung:"))
+        controls.addWidget(self.sort_combo)
+
+        ai_controls = QHBoxLayout()
+        ai_controls.addWidget(QLabel("AI-Profil:"))
+        ai_controls.addWidget(self.profile_combo)
+        ai_controls.addWidget(QLabel("Ziel:"))
+        ai_controls.addWidget(self.target_spin)
+        ai_controls.addWidget(self.ai_button)
+        ai_controls.addWidget(self.cancel_ai_button)
+        ai_controls.addStretch()
 
         self.grid_widget = QWidget()
         self.grid_layout = QGridLayout(self.grid_widget)
@@ -124,6 +202,7 @@ class MainWindow(QMainWindow):
         layout.setContentsMargins(18, 18, 18, 18)
         layout.addLayout(top)
         layout.addLayout(controls)
+        layout.addLayout(ai_controls)
         layout.addWidget(self.scroll)
 
         container = QWidget()
@@ -191,6 +270,22 @@ class MainWindow(QMainWindow):
             self.tag_filter_combo.currentText(),
         )
 
+    def _sorted_visible_photos(self) -> list[Photo]:
+        photos = self._visible_photos()
+        if self.sort_combo.currentText() == "AI-Score":
+            return sorted(photos, key=lambda photo: photo.ai_score or -1.0, reverse=True)
+        if self.sort_combo.currentText() == "Review-Status":
+            return sorted(photos, key=lambda photo: (photo.review_status, photo.path.name))
+        if self.sort_combo.currentText() == "Aufnahmedatum":
+            return sorted(
+                photos,
+                key=lambda photo: (
+                    photo.path.stat().st_mtime if photo.path.exists() else 0,
+                    photo.path.name,
+                ),
+            )
+        return photos
+
     def _apply_filter(self) -> None:
         self._relayout_gallery(force=True)
         self._update_status()
@@ -212,7 +307,7 @@ class MainWindow(QMainWindow):
             self.grid_layout.takeAt(0)
         for card in self.cards.values():
             card.hide()
-        for index, photo in enumerate(self._visible_photos()):
+        for index, photo in enumerate(self._sorted_visible_photos()):
             card = self.cards[photo.path]
             self.grid_layout.addWidget(card, index // columns, index % columns)
             card.show()
@@ -240,6 +335,37 @@ class MainWindow(QMainWindow):
         self._refresh_tag_filter()
         self._relayout_gallery(force=True)
         self._update_status()
+
+    def open_review_mode(self) -> None:
+        review_photos = [photo for photo in self.photos if photo.ai_selected or photo.selected]
+        if not review_photos:
+            QMessageBox.information(
+                self,
+                "Keine AI-Auswahl",
+                "Bitte zuerst eine AI-Auswahl starten.",
+            )
+            return
+        dialog = PreviewDialog(review_photos, 0, self)
+        dialog.selection_changed.connect(
+            lambda photo: mark_review_decision(
+                photo, photo.selected, self.manual_corrections, self.history
+            )
+        )
+        dialog.selection_changed.connect(self._on_photo_changed)
+        dialog.favorite_changed.connect(self._on_photo_changed)
+        dialog.exec()
+        self._relayout_gallery(force=True)
+        self._update_status()
+
+    def undo(self) -> None:
+        photo = self.history.undo()
+        if photo is not None:
+            self._on_photo_changed(photo)
+
+    def redo(self) -> None:
+        photo = self.history.redo()
+        if photo is not None:
+            self._on_photo_changed(photo)
 
     def _edit_tags(self, photo: Photo) -> None:
         dialog = TagDialog(photo, self)
@@ -283,6 +409,65 @@ class MainWindow(QMainWindow):
         self._relayout_gallery(force=True)
         self._update_status()
 
+    def start_ai_selection(self) -> None:
+        if not self.photos:
+            QMessageBox.information(
+                self, "Keine Fotos geladen", "Bitte zuerst einen Fotoordner auswählen."
+            )
+            return
+        if self.analysis_running:
+            return
+
+        profile = SelectionProfile(self.profile_combo.currentText())
+        request = SelectionRequest(
+            profile=profile,
+            target=SelectionTarget(count=self.target_spin.value()),
+        )
+        cache_file = Path("cache") / "ai-analysis-v1.json"
+        self.selection_worker = SelectionWorker(self.photos, request, cache_file)
+        self.selection_worker.signals.progress.connect(self._on_ai_progress)
+        self.selection_worker.signals.finished.connect(self._on_ai_finished)
+        self.selection_worker.signals.failed.connect(self._on_ai_failed)
+        self.analysis_running = True
+        self.ai_button.setEnabled(False)
+        self.cancel_ai_button.setEnabled(True)
+        self.statusBar().showMessage("AI-Analyse gestartet …")
+        self.thread_pool.start(self.selection_worker)
+
+    def cancel_ai_selection(self) -> None:
+        if self.selection_worker is not None:
+            self.selection_worker.cancel()
+        self.cancel_ai_button.setEnabled(False)
+        self.statusBar().showMessage("AI-Analyse wird abgebrochen …")
+
+    def _on_ai_progress(self, done: int, total: int, path: Path) -> None:
+        name = path.name if path and path.name else "Auswahl wird berechnet"
+        self.statusBar().showMessage(f"AI-Analyse: {done}/{total} · {name}")
+
+    def _on_ai_finished(self, summary) -> None:
+        self.analysis_running = False
+        self.selection_worker = None
+        self.ai_button.setEnabled(True)
+        self.cancel_ai_button.setEnabled(False)
+        for card in self.cards.values():
+            card.refresh_style()
+        self.series = summary.series
+        apply_series_groups(self.photos, summary.series)
+        self._relayout_gallery(force=True)
+        self._update_status()
+        error_note = f" · {len(summary.errors)} Fehler" if summary.errors else ""
+        self.statusBar().showMessage(
+            f"AI-Auswahl fertig: {len(summary.selected)} Empfehlungen, "
+            f"{len(summary.series)} Serien{error_note}"
+        )
+
+    def _on_ai_failed(self, message: str) -> None:
+        self.analysis_running = False
+        self.selection_worker = None
+        self.ai_button.setEnabled(True)
+        self.cancel_ai_button.setEnabled(False)
+        QMessageBox.warning(self, "AI-Analyse fehlgeschlagen", message)
+
     def open_export_dialog(self) -> None:
         if not self.photos:
             QMessageBox.information(
@@ -294,16 +479,35 @@ class MainWindow(QMainWindow):
                 self, "Keine Auswahl", "Bitte zuerst Fotos für den Export auswählen."
             )
             return
+        warnings = quality_warnings(self.photos)
+        if warnings:
+            answer = QMessageBox.question(
+                self,
+                "Qualitätscheck",
+                f"{len(warnings)} Warnungen gefunden. Trotzdem Export öffnen?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                self.filter_combo.setCurrentText(FILTER_SELECTED)
+                return
+        save_project_state(
+            Path("cache") / "project-state-v1.json",
+            self.photos,
+            self.series,
+            self.manual_corrections,
+        )
         dialog = ExportDialog(self.photos, self)
         dialog.exec()
 
     def _update_status(self) -> None:
         total = len(self.photos)
         selected = sum(photo.selected for photo in self.photos)
+        ai_selected = sum(photo.ai_selected for photo in self.photos)
         favorites = sum(photo.favorite for photo in self.photos)
+        reviewed, reviewable = review_progress(self.photos)
         visible = len(self._visible_photos()) if total else 0
         self.summary_label.setText(
-            f"{total} Fotos · {selected} ausgewählt · {favorites} Favoriten"
+            f"{total} Fotos · {selected} ausgewählt · {ai_selected} AI · "
+            f"{favorites} Favoriten · {reviewed}/{reviewable} geprüft"
         )
 
         if total:
