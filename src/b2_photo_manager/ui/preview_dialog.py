@@ -23,6 +23,7 @@ from b2_photo_manager.services.photo_metadata import (
 class PreviewDialog(QDialog):
     selection_changed = Signal(object)
     favorite_changed = Signal(object)
+    selection_decision_requested = Signal(object, bool)
 
     MIN_ZOOM = 0.1
     MAX_ZOOM = 8.0
@@ -268,10 +269,14 @@ class PreviewDialog(QDialog):
             self._load_current()
 
     def toggle_selection(self) -> None:
-        self.current_photo.selected = not self.current_photo.selected
-        self.current_photo.review_status = "kept" if self.current_photo.selected else "removed"
-        self.selection_changed.emit(self.current_photo)
+        self._set_selection(not self.current_photo.selected)
         self._update_info()
+
+    def _set_selection(self, selected: bool) -> None:
+        self.selection_decision_requested.emit(self.current_photo, selected)
+        self.current_photo.selected = selected
+        self.current_photo.review_status = "kept" if selected else "removed"
+        self.selection_changed.emit(self.current_photo)
 
     def toggle_favorite(self) -> None:
         self.current_photo.favorite = not self.current_photo.favorite
@@ -279,17 +284,11 @@ class PreviewDialog(QDialog):
         self._update_info()
 
     def select_current(self) -> None:
-        if not self.current_photo.selected:
-            self.current_photo.selected = True
-            self.current_photo.review_status = "kept"
-            self.selection_changed.emit(self.current_photo)
+        self._set_selection(True)
         self._update_info()
 
     def reject_current(self) -> None:
-        if self.current_photo.selected:
-            self.current_photo.selected = False
-            self.current_photo.review_status = "removed"
-            self.selection_changed.emit(self.current_photo)
+        self._set_selection(False)
         self._update_info()
 
     def set_fit(self) -> None:

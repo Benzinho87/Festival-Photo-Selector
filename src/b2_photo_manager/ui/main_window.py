@@ -346,9 +346,9 @@ class MainWindow(QMainWindow):
             )
             return
         dialog = PreviewDialog(review_photos, 0, self)
-        dialog.selection_changed.connect(
-            lambda photo: mark_review_decision(
-                photo, photo.selected, self.manual_corrections, self.history
+        dialog.selection_decision_requested.connect(
+            lambda photo, keep: mark_review_decision(
+                photo, keep, self.manual_corrections, self.history
             )
         )
         dialog.selection_changed.connect(self._on_photo_changed)
@@ -389,6 +389,11 @@ class MainWindow(QMainWindow):
             (index for index, photo in enumerate(self.photos) if photo.path == path), 0
         )
         dialog = PreviewDialog(self.photos, start_index, self)
+        dialog.selection_decision_requested.connect(
+            lambda photo, keep: mark_review_decision(
+                photo, keep, self.manual_corrections, self.history
+            )
+        )
         dialog.selection_changed.connect(self._on_photo_changed)
         dialog.favorite_changed.connect(self._on_photo_changed)
         dialog.exec()
