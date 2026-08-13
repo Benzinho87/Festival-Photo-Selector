@@ -15,12 +15,15 @@ class PhotoCard(QFrame):
     def __init__(self, photo: Photo) -> None:
         super().__init__()
         self.photo = photo
+        self.thumbnail_pixmap: QPixmap | None = None
+        self.card_width = CONFIG.thumbnail_width
+        self.card_height = CONFIG.thumbnail_height
         self.setObjectName("PhotoCard")
-        self.setFixedWidth(CONFIG.thumbnail_width + 24)
+        self.setFixedWidth(self.card_width + 24)
 
         self.thumbnail_label = QLabel("Lade Vorschau …")
         self.thumbnail_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.thumbnail_label.setFixedSize(CONFIG.thumbnail_width, CONFIG.thumbnail_height)
+        self.thumbnail_label.setFixedSize(self.card_width, self.card_height)
 
         self.selection_label = QLabel()
         self.selection_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
@@ -61,8 +64,21 @@ class PhotoCard(QFrame):
         self.refresh_style()
 
     def set_thumbnail(self, pixmap: QPixmap) -> None:
+        self.thumbnail_pixmap = pixmap
+        self._render_thumbnail()
+
+    def set_card_size(self, width: int) -> None:
+        self.card_width = width
+        self.card_height = round(width * CONFIG.thumbnail_height / CONFIG.thumbnail_width)
+        self.setFixedWidth(self.card_width + 24)
+        self.thumbnail_label.setFixedSize(self.card_width, self.card_height)
+        self._render_thumbnail()
+
+    def _render_thumbnail(self) -> None:
+        if self.thumbnail_pixmap is None:
+            return
         self.thumbnail_label.setPixmap(
-            pixmap.scaled(
+            self.thumbnail_pixmap.scaled(
                 self.thumbnail_label.size(),
                 Qt.AspectRatioMode.KeepAspectRatio,
                 Qt.TransformationMode.SmoothTransformation,

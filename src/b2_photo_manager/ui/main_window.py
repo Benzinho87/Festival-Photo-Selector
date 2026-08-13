@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QScrollArea,
+    QSlider,
     QSpinBox,
     QStatusBar,
     QToolBar,
@@ -68,6 +69,7 @@ class MainWindow(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
         self.selection_worker: SelectionWorker | None = None
         self.analysis_running = False
+        self.thumbnail_width = CONFIG.thumbnail_width
         self.series = ()
         self.manual_corrections = []
         self.history = ReviewHistory()
@@ -164,6 +166,14 @@ class MainWindow(QMainWindow):
         self.tag_filter_combo.addItem(ALL_TAGS)
         self.tag_filter_combo.currentTextChanged.connect(self._apply_filter)
 
+        self.thumbnail_slider = QSlider(Qt.Orientation.Horizontal)
+        self.thumbnail_slider.setRange(140, 420)
+        self.thumbnail_slider.setSingleStep(20)
+        self.thumbnail_slider.setPageStep(40)
+        self.thumbnail_slider.setValue(self.thumbnail_width)
+        self.thumbnail_slider.setFixedWidth(170)
+        self.thumbnail_slider.valueChanged.connect(self._set_thumbnail_width)
+
         top = QHBoxLayout()
         top.addWidget(self.heading)
         top.addStretch()
@@ -178,6 +188,8 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.tag_filter_combo)
         controls.addWidget(QLabel("Sortierung:"))
         controls.addWidget(self.sort_combo)
+        controls.addWidget(QLabel("Größe:"))
+        controls.addWidget(self.thumbnail_slider)
 
         ai_controls = QHBoxLayout()
         ai_controls.addWidget(QLabel("AI-Profil:"))
@@ -198,12 +210,30 @@ class MainWindow(QMainWindow):
         self.scroll.setWidgetResizable(True)
         self.scroll.setWidget(self.grid_widget)
 
+        self.selection_heading = QLabel("Auswahl")
+        self.selection_heading.setStyleSheet("font-weight: 600;")
+        self.selection_summary_label = QLabel("Noch keine Fotos ausgewählt.")
+
+        self.selection_grid_widget = QWidget()
+        self.selection_grid = QGridLayout(self.selection_grid_widget)
+        self.selection_grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self.selection_grid.setHorizontalSpacing(8)
+        self.selection_grid.setVerticalSpacing(8)
+
+        self.selection_scroll = QScrollArea()
+        self.selection_scroll.setWidgetResizable(True)
+        self.selection_scroll.setFixedHeight(190)
+        self.selection_scroll.setWidget(self.selection_grid_widget)
+
         layout = QVBoxLayout()
         layout.setContentsMargins(18, 18, 18, 18)
         layout.addLayout(top)
         layout.addLayout(controls)
         layout.addLayout(ai_controls)
         layout.addWidget(self.scroll)
+        layout.addWidget(self.selection_heading)
+        layout.addWidget(self.selection_summary_label)
+        layout.addWidget(self.selection_scroll)
 
         container = QWidget()
         container.setLayout(layout)
@@ -240,6 +270,7 @@ class MainWindow(QMainWindow):
 
         for photo in self.photos:
             card = PhotoCard(photo)
+            card.set_card_size(self.thumbnail_width)
             card.selection_changed.connect(self._on_photo_changed)
             card.favorite_changed.connect(self._on_photo_changed)
             card.tags_requested.connect(self._edit_tags)
@@ -253,6 +284,7 @@ class MainWindow(QMainWindow):
 
         self._refresh_tag_filter()
         self._relayout_gallery(force=True)
+        self._refresh_selection_overview()
         self._update_status()
 
     def _clear_grid(self) -> None:
@@ -296,7 +328,7 @@ class MainWindow(QMainWindow):
 
         columns = calculate_columns(
             viewport_width=self.scroll.viewport().width(),
-            card_width=CONFIG.thumbnail_width + 24,
+            card_width=self.thumbnail_width + 24,
             spacing=CONFIG.gallery_spacing,
             minimum=CONFIG.thumbnail_min_columns,
         )
@@ -312,6 +344,14 @@ class MainWindow(QMainWindow):
             self.grid_layout.addWidget(card, index // columns, index % columns)
             card.show()
         self.current_columns = columns
+
+    def _set_thumbnail_width(self, width: int) -> None:
+        self.thumbnail_width = width
+        for card in self.cards.values():
+            card.set_card_size(width)
+        self.current_columns = 0
+        self._relayout_gallery(force=True)
+        self._refresh_selection_overview()
 
     def _on_thumbnail_loaded(self, path: Path, image: QImage) -> None:
         card = self.cards.get(path)
@@ -334,7 +374,38 @@ class MainWindow(QMainWindow):
             card.refresh_style()
         self._refresh_tag_filter()
         self._relayout_gallery(force=True)
+        self._refresh_selection_overview()
         self._update_status()
+
+    def _refresh_selection_overview(self) -> None:
+        while self.selection_grid.count():
+            item = self.selection_grid.takeAt(0)
+            widget = item.widget()
+            if widget is not None:
+                widget.setParent(None)
+                widget.deleteLater()
+
+        selected_photos = [photo for photo in self.photos if photo.selected]
+        if not selected_photos:
+            self.selection_summary_label.setText("Noch keine Fotos ausgewählt.")
+            return
+
+        ai_count = sum(photo.ai_selected for photo in selected_photos)
+        manual_count = sum(photo.manual_change is not None for photo in selected_photos)
+        self.selection_summary_label.setText(
+            f"{len(selected_photos)} ausgewählt · {ai_count} AI · {manual_count} manuell geändert"
+        )
+
+        for index, photo in enumerate(selected_photos[:80]):
+            label = QLabel(photo.path.name)
+            label.setToolTip(str(photo.path))
+            label.setFixedWidth(150)
+            label.setWordWrap(True)
+            label.setStyleSheet(
+                "padding: 6px; border: 1px solid #3ba55d; border-radius: 6px;"
+                "background: #eef8f0;"
+            )
+            self.selection_grid.addWidget(label, index // 6, index % 6)
 
     def open_review_mode(self) -> None:
         review_photos = [photo for photo in self.photos if photo.ai_selected or photo.selected]
@@ -405,6 +476,7 @@ class MainWindow(QMainWindow):
             photo.selected = True
             self.cards[photo.path].refresh_style()
         self._relayout_gallery(force=True)
+        self._refresh_selection_overview()
         self._update_status()
 
     def clear_selection(self) -> None:
@@ -412,6 +484,7 @@ class MainWindow(QMainWindow):
             photo.selected = False
             self.cards[photo.path].refresh_style()
         self._relayout_gallery(force=True)
+        self._refresh_selection_overview()
         self._update_status()
 
     def start_ai_selection(self) -> None:
@@ -459,6 +532,7 @@ class MainWindow(QMainWindow):
         self.series = summary.series
         apply_series_groups(self.photos, summary.series)
         self._relayout_gallery(force=True)
+        self._refresh_selection_overview()
         self._update_status()
         error_note = f" · {len(summary.errors)} Fehler" if summary.errors else ""
         self.statusBar().showMessage(
