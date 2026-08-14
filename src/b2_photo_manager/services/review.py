@@ -84,9 +84,13 @@ class ReviewHistory:
 
 
 def review_progress(photos: list[Photo]) -> tuple[int, int]:
-    reviewable = [photo for photo in photos if photo.ai_selected or photo.selected]
+    reviewable = review_photos(photos)
     reviewed = [photo for photo in reviewable if photo.review_status != REVIEW_UNREVIEWED]
     return len(reviewed), len(reviewable)
+
+
+def review_photos(photos: list[Photo]) -> list[Photo]:
+    return [photo for photo in photos if photo.ai_selected]
 
 
 def mark_review_decision(

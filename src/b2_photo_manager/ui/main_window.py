@@ -47,6 +47,7 @@ from b2_photo_manager.services.review import (
     apply_series_groups,
     mark_review_decision,
     quality_warnings,
+    review_photos,
     review_progress,
     save_project_state,
 )
@@ -210,30 +211,12 @@ class MainWindow(QMainWindow):
         self.scroll.setWidgetResizable(True)
         self.scroll.setWidget(self.grid_widget)
 
-        self.selection_heading = QLabel("Auswahl")
-        self.selection_heading.setStyleSheet("font-weight: 600;")
-        self.selection_summary_label = QLabel("Noch keine Fotos ausgewählt.")
-
-        self.selection_grid_widget = QWidget()
-        self.selection_grid = QGridLayout(self.selection_grid_widget)
-        self.selection_grid.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-        self.selection_grid.setHorizontalSpacing(8)
-        self.selection_grid.setVerticalSpacing(8)
-
-        self.selection_scroll = QScrollArea()
-        self.selection_scroll.setWidgetResizable(True)
-        self.selection_scroll.setFixedHeight(190)
-        self.selection_scroll.setWidget(self.selection_grid_widget)
-
         layout = QVBoxLayout()
         layout.setContentsMargins(18, 18, 18, 18)
         layout.addLayout(top)
         layout.addLayout(controls)
         layout.addLayout(ai_controls)
         layout.addWidget(self.scroll)
-        layout.addWidget(self.selection_heading)
-        layout.addWidget(self.selection_summary_label)
-        layout.addWidget(self.selection_scroll)
 
         container = QWidget()
         container.setLayout(layout)
@@ -284,7 +267,6 @@ class MainWindow(QMainWindow):
 
         self._refresh_tag_filter()
         self._relayout_gallery(force=True)
-        self._refresh_selection_overview()
         self._update_status()
 
     def _clear_grid(self) -> None:
@@ -351,7 +333,6 @@ class MainWindow(QMainWindow):
             card.set_card_size(width)
         self.current_columns = 0
         self._relayout_gallery(force=True)
-        self._refresh_selection_overview()
 
     def _on_thumbnail_loaded(self, path: Path, image: QImage) -> None:
         card = self.cards.get(path)
@@ -374,49 +355,18 @@ class MainWindow(QMainWindow):
             card.refresh_style()
         self._refresh_tag_filter()
         self._relayout_gallery(force=True)
-        self._refresh_selection_overview()
         self._update_status()
 
-    def _refresh_selection_overview(self) -> None:
-        while self.selection_grid.count():
-            item = self.selection_grid.takeAt(0)
-            widget = item.widget()
-            if widget is not None:
-                widget.setParent(None)
-                widget.deleteLater()
-
-        selected_photos = [photo for photo in self.photos if photo.selected]
-        if not selected_photos:
-            self.selection_summary_label.setText("Noch keine Fotos ausgewählt.")
-            return
-
-        ai_count = sum(photo.ai_selected for photo in selected_photos)
-        manual_count = sum(photo.manual_change is not None for photo in selected_photos)
-        self.selection_summary_label.setText(
-            f"{len(selected_photos)} ausgewählt · {ai_count} AI · {manual_count} manuell geändert"
-        )
-
-        for index, photo in enumerate(selected_photos[:80]):
-            label = QLabel(photo.path.name)
-            label.setToolTip(str(photo.path))
-            label.setFixedWidth(150)
-            label.setWordWrap(True)
-            label.setStyleSheet(
-                "padding: 6px; border: 1px solid #3ba55d; border-radius: 6px;"
-                "background: #eef8f0;"
-            )
-            self.selection_grid.addWidget(label, index // 6, index % 6)
-
     def open_review_mode(self) -> None:
-        review_photos = [photo for photo in self.photos if photo.ai_selected or photo.selected]
-        if not review_photos:
+        photos_for_review = review_photos(self.photos)
+        if not photos_for_review:
             QMessageBox.information(
                 self,
                 "Keine AI-Auswahl",
                 "Bitte zuerst eine AI-Auswahl starten.",
             )
             return
-        dialog = PreviewDialog(review_photos, 0, self)
+        dialog = PreviewDialog(photos_for_review, 0, self, review_mode=True)
         dialog.selection_decision_requested.connect(
             lambda photo, keep: mark_review_decision(
                 photo, keep, self.manual_corrections, self.history
@@ -476,7 +426,6 @@ class MainWindow(QMainWindow):
             photo.selected = True
             self.cards[photo.path].refresh_style()
         self._relayout_gallery(force=True)
-        self._refresh_selection_overview()
         self._update_status()
 
     def clear_selection(self) -> None:
@@ -484,7 +433,6 @@ class MainWindow(QMainWindow):
             photo.selected = False
             self.cards[photo.path].refresh_style()
         self._relayout_gallery(force=True)
-        self._refresh_selection_overview()
         self._update_status()
 
     def start_ai_selection(self) -> None:
@@ -532,7 +480,6 @@ class MainWindow(QMainWindow):
         self.series = summary.series
         apply_series_groups(self.photos, summary.series)
         self._relayout_gallery(force=True)
-        self._refresh_selection_overview()
         self._update_status()
         error_note = f" · {len(summary.errors)} Fehler" if summary.errors else ""
         self.statusBar().showMessage(

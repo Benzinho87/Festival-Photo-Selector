@@ -44,7 +44,7 @@ class PillowTechnicalAnalyzer(PhotoAnalyzer):
                 subject_clarity=(sharpness * 0.7 + contrast * 0.3),
                 visual_quality=(technical.overall * 0.75 + _composition_score(gray) * 0.25),
             )
-            people = PeopleScores()
+            people = _people_scores(work, sharpness)
             score = technical.overall * 0.68 + aesthetic.overall * 0.32
             reasons = _reasons(technical, aesthetic)
             return AnalysisResult(
@@ -123,6 +123,47 @@ def _composition_score(gray: Image.Image) -> float:
     if total <= 0:
         return 0.45
     return _clamp(weighted / total / 0.86)
+
+
+def _people_scores(image: Image.Image, sharpness: float) -> PeopleScores:
+    pixels = list(image.getdata())
+    if not pixels:
+        return PeopleScores(face_sharpness=0.0)
+
+    skin_like = 0
+    warm_subject = 0
+    center_weighted = 0.0
+    total_weight = 0.0
+    width, height = image.size
+    for y in range(0, height, 3):
+        for x in range(0, width, 3):
+            red, green, blue = image.getpixel((x, y))
+            brightness = (red + green + blue) / (3 * 255)
+            warm = red > 70 and green > 35 and blue > 20 and red > blue * 1.12
+            balanced = abs(red - green) > 8 and max(red, green, blue) - min(red, green, blue) > 18
+            if warm and balanced:
+                skin_like += 1
+                center_distance = abs(x - width / 2) / max(width, 1)
+                center_distance += abs(y - height / 2) / max(height, 1)
+                center_weighted += max(0.0, 1.0 - center_distance) * brightness
+            if red > green > blue and brightness > 0.18:
+                warm_subject += 1
+            total_weight += 1.0
+
+    skin_ratio = skin_like / total_weight
+    warm_ratio = warm_subject / total_weight
+    center_signal = center_weighted / max(skin_like, 1)
+    people_signal = _clamp(skin_ratio * 7.5 + warm_ratio * 1.4 + center_signal * 0.35)
+    faces_present = people_signal >= 0.34
+    face_count = 1 if faces_present else 0
+    face_sharpness = _clamp(sharpness * 0.55 + people_signal * 0.45)
+    eyes_open = _clamp(0.45 + sharpness * 0.35) if faces_present else None
+    return PeopleScores(
+        faces_present=faces_present,
+        face_count=face_count,
+        eyes_open=eyes_open,
+        face_sharpness=face_sharpness,
+    )
 
 
 def _reasons(technical: TechnicalScores, aesthetic: AestheticScores) -> tuple[str, ...]:

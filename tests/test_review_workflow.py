@@ -16,6 +16,7 @@ from b2_photo_manager.services.review import (
     load_project_state,
     mark_review_decision,
     quality_warnings,
+    review_photos,
     review_progress,
     save_project_state,
 )
@@ -51,6 +52,15 @@ def test_review_progress_and_manual_correction() -> None:
     changed = history.undo()
     assert changed is photo
     assert photo.selected is True
+
+
+def test_review_photos_only_include_ai_selected_items() -> None:
+    ai_photo = Photo(Path("ai.jpg"), selected=True, ai_selected=True)
+    manual_photo = Photo(Path("manual.jpg"), selected=True, ai_selected=False)
+    other_photo = Photo(Path("other.jpg"))
+
+    assert review_photos([ai_photo, manual_photo, other_photo]) == [ai_photo]
+    assert review_progress([ai_photo, manual_photo, other_photo]) == (0, 1)
 
 
 def test_series_groups_assign_rank_by_ai_score() -> None:

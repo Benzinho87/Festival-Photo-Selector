@@ -34,6 +34,7 @@ class PreviewDialog(QDialog):
         photos: list[Photo],
         start_index: int,
         parent: QWidget | None = None,
+        review_mode: bool = False,
     ) -> None:
         super().__init__(parent)
         if not photos:
@@ -45,8 +46,11 @@ class PreviewDialog(QDialog):
         self.zoom_factor = 1.0
         self.original_pixmap: QPixmap | None = None
         self.metadata: PhotoMetadata | None = None
+        self.review_mode = review_mode
 
-        self.setWindowTitle("B² Photo Manager – Viewer")
+        self.setWindowTitle(
+            "B² Photo Manager – Review" if review_mode else "B² Photo Manager – Viewer"
+        )
         self.resize(1400, 900)
         self.setStyleSheet(
             "QDialog { background: #17191c; color: #f3f3f3; }"
@@ -248,7 +252,8 @@ class PreviewDialog(QDialog):
 
     def _update_info(self) -> None:
         photo = self.current_photo
-        self.position_label.setText(f"Foto {self.index + 1} von {len(self.photos)}")
+        prefix = "Review" if self.review_mode else "Foto"
+        self.position_label.setText(f"{prefix} {self.index + 1} von {len(self.photos)}")
         self.metadata_label.setText(self._metadata_text())
         self.zoom_label.setText("Fit" if self.fit_to_window else f"{self.zoom_factor:.0%}")
         self.selection_button.setText(
