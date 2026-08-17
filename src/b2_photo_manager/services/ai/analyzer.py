@@ -6,6 +6,7 @@ from PIL import Image, ImageChops, ImageFilter, ImageOps, ImageStat
 from b2_photo_manager.services.ai.models import (
     AestheticScores,
     AnalysisResult,
+    ContentFingerprint,
     PeopleScores,
     TechnicalScores,
 )
@@ -45,6 +46,7 @@ class PillowTechnicalAnalyzer(PhotoAnalyzer):
                 visual_quality=(technical.overall * 0.75 + _composition_score(gray) * 0.25),
             )
             people = _people_scores(work, sharpness)
+            content = _content_fingerprint(work, gray)
             score = technical.overall * 0.68 + aesthetic.overall * 0.32
             reasons = _reasons(technical, aesthetic)
             return AnalysisResult(
@@ -56,6 +58,7 @@ class PillowTechnicalAnalyzer(PhotoAnalyzer):
                 aesthetic=aesthetic,
                 people=people,
                 perceptual_hash=average_hash(gray),
+                content=content,
                 score=score,
                 recommendation=_recommendation(score),
                 reasons=reasons,
@@ -163,6 +166,33 @@ def _people_scores(image: Image.Image, sharpness: float) -> PeopleScores:
         face_count=face_count,
         eyes_open=eyes_open,
         face_sharpness=face_sharpness,
+    )
+
+
+def _content_fingerprint(image: Image.Image, gray: Image.Image) -> ContentFingerprint:
+    small = image.resize((32, 32), Image.Resampling.LANCZOS)
+    small_gray = gray.resize((32, 32), Image.Resampling.LANCZOS)
+    edges = small_gray.filter(ImageFilter.FIND_EDGES)
+    quadrants = ((0, 0, 16, 16), (16, 0, 32, 16), (0, 16, 16, 32), (16, 16, 32, 32))
+
+    brightness = tuple(
+        _clamp(ImageStat.Stat(small_gray.crop(box)).mean[0] / 255.0) for box in quadrants
+    )
+    edge_values = tuple(
+        _clamp(ImageStat.Stat(edges.crop(box)).mean[0] / 48.0) for box in quadrants
+    )
+    stat = ImageStat.Stat(small)
+    red, green, blue = (value / 255.0 for value in stat.mean)
+    total = max(red + green + blue, 0.001)
+    colors = (red / total, green / total, blue / total)
+    warmth = _clamp((red - blue + 0.35) / 0.7)
+    aspect_ratio = _clamp(image.width / max(image.height, 1) / 2.4)
+    return ContentFingerprint(
+        brightness=brightness,
+        colors=colors,
+        edges=edge_values,
+        warmth=warmth,
+        aspect_ratio=aspect_ratio,
     )
 
 

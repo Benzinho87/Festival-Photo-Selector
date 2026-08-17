@@ -48,6 +48,14 @@ def _image(path: Path, size: tuple[int, int] = (400, 200), exif_author: str | No
         image.save(path)
 
 
+def _oriented_image(path: Path) -> None:
+    image = Image.new("RGB", (400, 200), "blue")
+    exif = Image.Exif()
+    exif[274] = 6
+    exif[315] = "Erika"
+    image.save(path, exif=exif)
+
+
 def test_exportable_photos_uses_selection_and_optional_favorites() -> None:
     first = Photo(Path("first.jpg"), selected=True, favorite=False)
     second = Photo(Path("second.jpg"), selected=True, favorite=True)
@@ -101,6 +109,22 @@ def test_export_resizes_and_does_not_overwrite_existing_files(tmp_path: Path) ->
     with Image.open(output) as exported:
         assert exported.size == (100, 50)
     assert (destination / "event_001.jpg").read_text() == "existing"
+
+
+def test_export_applies_orientation_without_keeping_stale_rotation(tmp_path: Path) -> None:
+    source = tmp_path / "portrait.jpg"
+    _oriented_image(source)
+
+    export_photos(
+        [Photo(source, selected=True)],
+        tmp_path / "exports",
+        _preset(long_edge=100, keep_metadata=True),
+    )
+
+    with Image.open(tmp_path / "exports" / "event_001.jpg") as exported:
+        assert exported.size == (50, 100)
+        assert exported.getexif().get(274) is None
+        assert exported.getexif().get(315) == "Erika"
 
 
 def test_export_can_keep_or_remove_metadata(tmp_path: Path) -> None:

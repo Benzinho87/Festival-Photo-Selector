@@ -8,6 +8,7 @@ from b2_photo_manager.services.ai.analyzer import PhotoAnalyzer, PillowTechnical
 from b2_photo_manager.services.ai.cache import AnalysisCache
 from b2_photo_manager.services.ai.models import (
     AnalysisResult,
+    ContentFingerprint,
     SelectionProfile,
     SelectionRequest,
     SelectionSummary,
@@ -85,6 +86,7 @@ class SelectionEngine:
 
         groups = group_similar_series(list(scored_results.values()))
         lookup = series_lookup(groups)
+        ranks = _series_ranks(analyzed, lookup)
         target = request.target.resolve(len(photo_list))
         selected_paths = self._diverse_selection(analyzed, lookup, target, request.profile)
         algorithm_selected_set = set(selected_paths)
@@ -98,9 +100,7 @@ class SelectionEngine:
             photo.ai_selected = photo.path in selected_set
             photo.selected = photo.path in algorithm_selected_set
             if photo.ai_selected:
-                photo.selection_reason = (
-                    "diversity" if lookup.get(photo.path, -1) != -1 else "quality"
-                )
+                photo.selection_reason = _selection_reason(photo, lookup, ranks)
             if photo.favorite and request.preserve_favorites:
                 photo.ai_selected = True
                 photo.selection_reason = "favorite"
@@ -147,24 +147,106 @@ class SelectionEngine:
             return [photo.path for photo in candidates[:target]]
 
         selected: list[Path] = []
-        rounds = 0
-        while len(selected) < target:
-            added = False
-            ranked_groups = sorted(
-                by_series.values(),
-                key=lambda items: (items[rounds].ai_score if len(items) > rounds else -1.0) or 0.0,
-                reverse=True,
-            )
-            for items in ranked_groups:
-                if len(selected) >= target:
-                    break
-                if len(items) > rounds:
-                    selected.append(items[rounds].path)
-                    added = True
-            if not added:
+        ranked_groups = sorted(
+            by_series.values(),
+            key=lambda items: items[0].ai_score if items else -1.0,
+            reverse=True,
+        )
+        for items in ranked_groups:
+            if len(selected) >= target:
                 break
-            rounds += 1
+            if items and (not selected or _is_distinct_enough(items[0], selected, photos)):
+                selected.append(items[0].path)
+
+        skipped_group_winners = [
+            items[0]
+            for items in ranked_groups
+            if items and items[0].path not in selected
+        ]
+
+        variant_candidates = [
+            photo
+            for items in ranked_groups
+            for photo in items[1:]
+            if photo.path not in selected
+        ]
+        variant_candidates = skipped_group_winners + variant_candidates
+        variant_candidates.sort(key=lambda photo: photo.ai_score or 0.0, reverse=True)
+        for photo in variant_candidates:
+            if len(selected) >= target:
+                break
+            if _is_distinct_enough(photo, selected, photos):
+                selected.append(photo.path)
+
+        all_candidates = sorted(photos, key=lambda photo: photo.ai_score or 0.0, reverse=True)
+        for photo in all_candidates:
+            if len(selected) >= target:
+                break
+            if photo.path not in selected:
+                selected.append(photo.path)
         return selected
+
+
+def _selection_reason(
+    photo: Photo,
+    lookup: dict[Path, int],
+    ranks: dict[Path, int],
+) -> str:
+    if lookup.get(photo.path, -1) == -1:
+        return "quality"
+    return "series_best" if ranks.get(photo.path) == 1 else "content_variant"
+
+
+def _series_ranks(photos: list[Photo], lookup: dict[Path, int]) -> dict[Path, int]:
+    by_series: dict[int, list[Photo]] = defaultdict(list)
+    for photo in photos:
+        by_series[lookup.get(photo.path, -1)].append(photo)
+    ranks: dict[Path, int] = {}
+    for items in by_series.values():
+        items.sort(key=lambda photo: photo.ai_score or 0.0, reverse=True)
+        for rank, photo in enumerate(items, start=1):
+            ranks[photo.path] = rank
+    return ranks
+
+
+def _is_distinct_enough(candidate: Photo, selected: list[Path], photos: list[Photo]) -> bool:
+    by_path = {photo.path: photo for photo in photos}
+    for selected_path in selected:
+        selected_photo = by_path[selected_path]
+        if _near_duplicate(candidate, selected_photo):
+            return False
+    return True
+
+
+def _near_duplicate(left: Photo, right: Photo) -> bool:
+    if left.ai_analysis is None or right.ai_analysis is None:
+        return False
+    hash_distance = (
+        int(left.ai_analysis.perceptual_hash, 16)
+        ^ int(right.ai_analysis.perceptual_hash, 16)
+    ).bit_count()
+    if hash_distance <= 8:
+        return True
+    if left.ai_analysis.content == ContentFingerprint.empty() or (
+        right.ai_analysis.content == ContentFingerprint.empty()
+    ):
+        return False
+    return _content_distance(left.ai_analysis.content, right.ai_analysis.content) < 0.18
+
+
+def _content_distance(left: ContentFingerprint, right: ContentFingerprint) -> float:
+    values = [
+        *_pairwise_differences(left.brightness, right.brightness),
+        *_pairwise_differences(left.colors, right.colors),
+        *_pairwise_differences(left.edges, right.edges),
+        abs(left.warmth - right.warmth),
+        abs(left.aspect_ratio - right.aspect_ratio),
+    ]
+    return sum(values) / max(len(values), 1)
+
+
+def _pairwise_differences(left: tuple[float, ...], right: tuple[float, ...]) -> list[float]:
+    return [abs(a - b) for a, b in zip(left, right, strict=False)]
 
 
 def _merge_keep_order(primary: list[Path], additions: list[Path]) -> list[Path]:

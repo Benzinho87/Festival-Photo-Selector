@@ -13,12 +13,10 @@ from b2_photo_manager.services.review import (
     REVIEW_REMOVED,
     ReviewHistory,
     apply_series_groups,
-    load_project_state,
     mark_review_decision,
     quality_warnings,
     review_photos,
     review_progress,
-    save_project_state,
 )
 
 
@@ -72,25 +70,6 @@ def test_series_groups_assign_rank_by_ai_score() -> None:
     assert second.series_id == 3
     assert second.series_rank == 1
     assert second.selection_reason == "series_rank"
-
-
-def test_project_state_roundtrip(tmp_path: Path) -> None:
-    source = Photo(Path("a.jpg"), selected=True, favorite=True, tags={"Bühne"})
-    source.ai_analysis = analysis(source.path, 0.9, "abc")
-    source.ai_score = 0.9
-    source.review_status = "kept"
-    state_file = tmp_path / "project.json"
-
-    save_project_state(state_file, [source], (SeriesGroup(1, (source.path,)),), [])
-    restored = Photo(Path("a.jpg"))
-    series, corrections = load_project_state(state_file, [restored])
-
-    assert restored.selected is True
-    assert restored.tags == {"Bühne"}
-    assert restored.ai_analysis is not None
-    assert restored.review_status == "kept"
-    assert series[0].id == 1
-    assert corrections == []
 
 
 def test_quality_warnings_detect_blur_duplicates_and_series_overlap() -> None:

@@ -160,6 +160,8 @@ def _export_one(source: Path, destination: Path, preset: ExportPreset) -> int:
     with Image.open(source) as image:
         exif = image.getexif() if preset.keep_metadata else None
         converted = ImageOps.exif_transpose(image).convert("RGB")
+        if exif:
+            exif.pop(274, None)
         converted.thumbnail(_target_size(converted.size, preset), Image.Resampling.LANCZOS)
         if preset.target_size_kb:
             _save_with_target_size(converted, destination, preset, exif)
@@ -174,8 +176,6 @@ def _target_size(size: tuple[int, int], preset: ExportPreset) -> tuple[int, int]
         return (preset.max_width or width, preset.max_height or height)
 
     long_edge = preset.long_edge or max(width, height)
-    if width >= height:
-        return (long_edge, long_edge)
     return (long_edge, long_edge)
 
 

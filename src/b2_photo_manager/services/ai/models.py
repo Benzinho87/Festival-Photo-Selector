@@ -76,6 +76,28 @@ class PeopleScores:
 
 
 @dataclass(frozen=True, slots=True)
+class ContentFingerprint:
+    brightness: tuple[float, ...]
+    colors: tuple[float, ...]
+    edges: tuple[float, ...]
+    warmth: float
+    aspect_ratio: float
+
+    @classmethod
+    def empty(cls) -> "ContentFingerprint":
+        return cls(
+            brightness=(0.0, 0.0, 0.0, 0.0),
+            colors=(0.0, 0.0, 0.0),
+            edges=(0.0, 0.0, 0.0, 0.0),
+            warmth=0.0,
+            aspect_ratio=1.0,
+        )
+
+    def to_json(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
 class AnalysisResult:
     path: Path
     file_signature: str
@@ -89,6 +111,7 @@ class AnalysisResult:
     recommendation: str
     reasons: tuple[str, ...] = field(default_factory=tuple)
     error: str | None = None
+    content: ContentFingerprint = field(default_factory=ContentFingerprint.empty)
 
     def to_json(self) -> dict[str, Any]:
         data = asdict(self)
@@ -97,6 +120,17 @@ class AnalysisResult:
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> "AnalysisResult":
+        content_data = data.get("content")
+        if isinstance(content_data, dict):
+            content = ContentFingerprint(
+                brightness=tuple(content_data.get("brightness", (0.0, 0.0, 0.0, 0.0))),
+                colors=tuple(content_data.get("colors", (0.0, 0.0, 0.0))),
+                edges=tuple(content_data.get("edges", (0.0, 0.0, 0.0, 0.0))),
+                warmth=float(content_data.get("warmth", 0.0)),
+                aspect_ratio=float(content_data.get("aspect_ratio", 1.0)),
+            )
+        else:
+            content = ContentFingerprint.empty()
         return cls(
             path=Path(data["path"]),
             file_signature=data["file_signature"],
@@ -110,6 +144,7 @@ class AnalysisResult:
             recommendation=str(data["recommendation"]),
             reasons=tuple(data.get("reasons", ())),
             error=data.get("error"),
+            content=content,
         )
 
 

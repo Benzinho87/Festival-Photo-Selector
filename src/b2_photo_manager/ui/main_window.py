@@ -42,6 +42,14 @@ from b2_photo_manager.services.photo_filter import (
     filter_photos,
 )
 from b2_photo_manager.services.photo_finder import find_photos
+from b2_photo_manager.services.project import (
+    AutoSaveController,
+    Project,
+    ProjectFileError,
+    ProjectStore,
+    RecentProjects,
+    RecoveryManager,
+)
 from b2_photo_manager.services.review import (
     ReviewHistory,
     apply_series_groups,
@@ -49,7 +57,6 @@ from b2_photo_manager.services.review import (
     quality_warnings,
     review_photos,
     review_progress,
-    save_project_state,
 )
 from b2_photo_manager.services.thumbnail_service import ThumbnailWorker
 from b2_photo_manager.ui.export_dialog import ExportDialog
@@ -74,6 +81,11 @@ class MainWindow(QMainWindow):
         self.series = ()
         self.manual_corrections = []
         self.history = ReviewHistory()
+        self.project: Project | None = None
+        self.project_store = ProjectStore()
+        self.recent_projects = RecentProjects()
+        self.recovery_manager = RecoveryManager()
+        self.autosave = AutoSaveController(self.project_store, self.recovery_manager)
 
         self.setWindowTitle(f"{CONFIG.app_name} {CONFIG.version}")
         self.resize(1200, 820)
@@ -87,9 +99,21 @@ class MainWindow(QMainWindow):
         toolbar.setMovable(False)
         self.addToolBar(toolbar)
 
-        open_action = QAction("Fotoordner auswählen", self)
+        open_action = QAction("Neues Projekt / Fotoordner", self)
         open_action.triggered.connect(self.choose_folder)
         toolbar.addAction(open_action)
+
+        open_project_action = QAction("Projekt öffnen", self)
+        open_project_action.triggered.connect(self.open_project)
+        toolbar.addAction(open_project_action)
+
+        save_project_action = QAction("Projekt speichern", self)
+        save_project_action.triggered.connect(self.save_project)
+        toolbar.addAction(save_project_action)
+
+        save_project_as_action = QAction("Speichern unter …", self)
+        save_project_as_action.triggered.connect(self.save_project_as)
+        toolbar.addAction(save_project_as_action)
         toolbar.addSeparator()
 
         select_all_action = QAction("Alles auswählen", self)
@@ -167,6 +191,10 @@ class MainWindow(QMainWindow):
         self.tag_filter_combo.addItem(ALL_TAGS)
         self.tag_filter_combo.currentTextChanged.connect(self._apply_filter)
 
+        self.recent_combo = QComboBox()
+        self.recent_combo.currentIndexChanged.connect(self._open_recent_project)
+        self._refresh_recent_projects()
+
         self.thumbnail_slider = QSlider(Qt.Orientation.Horizontal)
         self.thumbnail_slider.setRange(140, 420)
         self.thumbnail_slider.setSingleStep(20)
@@ -189,6 +217,8 @@ class MainWindow(QMainWindow):
         controls.addWidget(self.tag_filter_combo)
         controls.addWidget(QLabel("Sortierung:"))
         controls.addWidget(self.sort_combo)
+        controls.addWidget(QLabel("Zuletzt:"))
+        controls.addWidget(self.recent_combo)
         controls.addWidget(QLabel("Größe:"))
         controls.addWidget(self.thumbnail_slider)
 
@@ -242,10 +272,17 @@ class MainWindow(QMainWindow):
             )
             return
         self.load_photos(paths)
+        self.project = Project.new(Path(selected), self.photos)
+        self.project.project_file = self._default_project_file(Path(selected))
+        self.autosave.set_project(self.project)
+        self.save_project()
 
     def load_photos(self, paths: list[Path]) -> None:
+        self._load_photo_objects([Photo(path=path) for path in paths])
+
+    def _load_photo_objects(self, photos: list[Photo]) -> None:
         self._clear_grid()
-        self.photos = [Photo(path=path) for path in paths]
+        self.photos = photos
         self.cards = {}
         self.loaded_count = 0
         self.current_columns = 0
@@ -267,7 +304,135 @@ class MainWindow(QMainWindow):
 
         self._refresh_tag_filter()
         self._relayout_gallery(force=True)
+        self._mark_project_dirty()
         self._update_status()
+
+    def _default_project_file(self, source_folder: Path) -> Path:
+        return source_folder / f"{source_folder.name or 'Neues Projekt'}.b2project"
+
+    def _sync_project_snapshot(self) -> None:
+        if self.project is None:
+            return
+        self.project.snapshot.photos = self.photos
+        self.project.snapshot.series = self.series
+        self.project.snapshot.manual_corrections = self.manual_corrections
+
+    def _mark_project_dirty(self) -> None:
+        if self.project is None:
+            return
+        self._sync_project_snapshot()
+        self.autosave.mark_dirty()
+
+    def open_project(self) -> None:
+        selected, _filter = QFileDialog.getOpenFileName(
+            self,
+            "Projekt öffnen",
+            str(CONFIG.default_photo_directory),
+            "B² Projekte (*.b2project)",
+        )
+        if selected:
+            self.load_project(Path(selected))
+
+    def load_project(self, path: Path) -> None:
+        load_path = path
+        recovery = self.recovery_manager.inspect(path)
+        if recovery.autosave_file is not None:
+            answer = QMessageBox.question(
+                self,
+                "Auto-Save gefunden",
+                "Für dieses Projekt wurde ein neuerer automatisch gespeicherter Stand gefunden. "
+                "Wiederherstellen?",
+            )
+            if answer == QMessageBox.StandardButton.Yes:
+                load_path = recovery.autosave_file
+        try:
+            project = self.project_store.load(load_path)
+        except ProjectFileError:
+            backup = self.recovery_manager.backup_file_for(path)
+            if not backup.exists():
+                QMessageBox.warning(
+                    self,
+                    "Projekt beschädigt",
+                    "Das Projekt konnte nicht geöffnet werden. Die Projektdatei ist beschädigt "
+                    "oder stammt aus einer nicht unterstützten Version.",
+                )
+                return
+            answer = QMessageBox.question(
+                self,
+                "Projekt beschädigt",
+                "Das Projekt konnte nicht geöffnet werden. Eine Recovery-Version ist vorhanden. "
+                "Recovery öffnen?",
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+            project = self.project_store.load(backup)
+
+        project.project_file = path
+        self.project = project
+        self.series = project.snapshot.series
+        self.manual_corrections = project.snapshot.manual_corrections
+        self.history = ReviewHistory()
+        self.autosave.set_project(project)
+        self._load_photo_objects(project.snapshot.photos)
+        self.recent_projects.add(path)
+        self._refresh_recent_projects()
+        if project.snapshot.missing_photos:
+            QMessageBox.warning(
+                self,
+                "Fehlende Fotos",
+                f"{len(project.snapshot.missing_photos)} gespeicherte Fotos wurden nicht gefunden. "
+                "Das Projekt wurde soweit möglich geöffnet.",
+            )
+
+    def save_project(self) -> None:
+        if self.project is None:
+            return
+        if self.project.project_file is None:
+            self.save_project_as()
+            return
+        try:
+            self._sync_project_snapshot()
+            self.project_store.save(self.project)
+            if self.project.project_file is not None:
+                self.recent_projects.add(self.project.project_file)
+                self._refresh_recent_projects()
+            self._update_status()
+        except (OSError, ProjectFileError) as exc:
+            if self.project is not None:
+                self.project.last_save_failed = True
+            QMessageBox.warning(self, "Speichern fehlgeschlagen", str(exc))
+
+    def save_project_as(self) -> None:
+        if self.project is None:
+            return
+        default = self.project.project_file or self._default_project_file(
+            self.project.source_folder
+        )
+        selected, _filter = QFileDialog.getSaveFileName(
+            self,
+            "Projekt speichern unter",
+            str(default),
+            "B² Projekte (*.b2project)",
+        )
+        if selected:
+            self.project.project_file = Path(selected)
+            self.save_project()
+
+    def _refresh_recent_projects(self) -> None:
+        if not hasattr(self, "recent_combo"):
+            return
+        self.recent_combo.blockSignals(True)
+        self.recent_combo.clear()
+        self.recent_combo.addItem("–", None)
+        for path in self.recent_projects.list():
+            self.recent_combo.addItem(path.name, str(path))
+        self.recent_combo.blockSignals(False)
+
+    def _open_recent_project(self, index: int) -> None:
+        path_text = self.recent_combo.itemData(index)
+        if path_text:
+            self.recent_combo.setCurrentIndex(0)
+            self.load_project(Path(path_text))
 
     def _clear_grid(self) -> None:
         while self.grid_layout.count():
@@ -376,6 +541,7 @@ class MainWindow(QMainWindow):
         dialog.favorite_changed.connect(self._on_photo_changed)
         dialog.exec()
         self._relayout_gallery(force=True)
+        self._mark_project_dirty()
         self._update_status()
 
     def undo(self) -> None:
@@ -419,6 +585,7 @@ class MainWindow(QMainWindow):
         dialog.favorite_changed.connect(self._on_photo_changed)
         dialog.exec()
         self._relayout_gallery(force=True)
+        self._mark_project_dirty()
         self._update_status()
 
     def select_all(self) -> None:
@@ -426,6 +593,7 @@ class MainWindow(QMainWindow):
             photo.selected = True
             self.cards[photo.path].refresh_style()
         self._relayout_gallery(force=True)
+        self._mark_project_dirty()
         self._update_status()
 
     def clear_selection(self) -> None:
@@ -433,6 +601,7 @@ class MainWindow(QMainWindow):
             photo.selected = False
             self.cards[photo.path].refresh_style()
         self._relayout_gallery(force=True)
+        self._mark_project_dirty()
         self._update_status()
 
     def start_ai_selection(self) -> None:
@@ -449,7 +618,7 @@ class MainWindow(QMainWindow):
             profile=profile,
             target=SelectionTarget(count=self.target_spin.value()),
         )
-        cache_file = Path("cache") / "ai-analysis-v1.json"
+        cache_file = Path("cache") / "ai-analysis-v2.json"
         self.selection_worker = SelectionWorker(self.photos, request, cache_file)
         self.selection_worker.signals.progress.connect(self._on_ai_progress)
         self.selection_worker.signals.finished.connect(self._on_ai_finished)
@@ -480,6 +649,7 @@ class MainWindow(QMainWindow):
         self.series = summary.series
         apply_series_groups(self.photos, summary.series)
         self._relayout_gallery(force=True)
+        self._mark_project_dirty()
         self._update_status()
         error_note = f" · {len(summary.errors)} Fehler" if summary.errors else ""
         self.statusBar().showMessage(
@@ -515,12 +685,7 @@ class MainWindow(QMainWindow):
             if answer != QMessageBox.StandardButton.Yes:
                 self.filter_combo.setCurrentText(FILTER_SELECTED)
                 return
-        save_project_state(
-            Path("cache") / "project-state-v1.json",
-            self.photos,
-            self.series,
-            self.manual_corrections,
-        )
+        self.save_project()
         dialog = ExportDialog(self.photos, self)
         dialog.exec()
 
@@ -537,10 +702,29 @@ class MainWindow(QMainWindow):
         )
 
         if total:
-            message = f"{visible} sichtbar · Vorschaubilder geladen: {self.loaded_count}/{total}"
+            save_state = (
+                "Nicht gespeicherte Änderungen"
+                if self.project is not None and self.project.dirty
+                else "Gespeichert"
+            )
+            message = (
+                f"{visible} sichtbar · Vorschaubilder geladen: {self.loaded_count}/{total} · "
+                f"{save_state}"
+            )
         else:
             message = "Noch kein Fotoordner geladen"
         self.statusBar().showMessage(message)
+
+    def closeEvent(self, event) -> None:
+        if self.project is not None and self.project.dirty:
+            self._sync_project_snapshot()
+            if not self.autosave.save_if_dirty() and self.project.last_save_failed:
+                QMessageBox.warning(
+                    self,
+                    "Nicht gespeichert",
+                    "Auto-Save ist fehlgeschlagen. Bitte speichere das Projekt manuell.",
+                )
+        super().closeEvent(event)
 
     def resizeEvent(self, event: QResizeEvent) -> None:
         super().resizeEvent(event)

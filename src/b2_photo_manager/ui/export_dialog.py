@@ -51,8 +51,8 @@ class ExportDialog(QDialog):
         )
 
         self.resize_combo = QComboBox()
-        self.resize_combo.addItem("Lange Kante", ResizeMode.LONG_EDGE.value)
-        self.resize_combo.addItem("Max. Breite/Höhe", ResizeMode.BOUNDING_BOX.value)
+        self.resize_combo.addItem("Maximale Bildkante", ResizeMode.LONG_EDGE.value)
+        self.resize_combo.addItem("Maximaler Rahmen", ResizeMode.BOUNDING_BOX.value)
 
         self.long_edge_spin = self._spinbox(1, 12000, " px")
         self.max_width_spin = self._spinbox(1, 12000, " px")
@@ -93,7 +93,7 @@ class ExportDialog(QDialog):
         form.addRow("", self.favorites_only_check)
         form.addRow("Format", self.format_combo)
         form.addRow("Skalierung", self.resize_combo)
-        form.addRow("Lange Kante", self.long_edge_spin)
+        form.addRow("Max. Bildkante", self.long_edge_spin)
         form.addRow("Max. Breite", self.max_width_spin)
         form.addRow("Max. Höhe", self.max_height_spin)
         form.addRow("Qualität", self.quality_spin)

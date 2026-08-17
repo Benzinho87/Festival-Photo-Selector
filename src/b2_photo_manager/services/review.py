@@ -1,13 +1,12 @@
 from __future__ import annotations
 
-import json
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from b2_photo_manager.models.photo import Photo
-from b2_photo_manager.services.ai.models import AnalysisResult, SeriesGroup
+from b2_photo_manager.services.ai.models import SeriesGroup
 
 REVIEW_UNREVIEWED = "unreviewed"
 REVIEW_KEPT = "kept"
@@ -208,46 +207,6 @@ def quality_warnings(photos: list[Photo]) -> list[QualityWarning]:
     return warnings
 
 
-def save_project_state(
-    path: Path,
-    photos: list[Photo],
-    series: tuple[SeriesGroup, ...],
-    corrections: list[ManualCorrection],
-) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    payload = {
-        "version": 1,
-        "photos": [_photo_to_json(photo) for photo in photos],
-        "series": [
-            {"id": group.id, "photos": [str(item) for item in group.photos]}
-            for group in series
-        ],
-        "manual_corrections": [correction.to_json() for correction in corrections],
-    }
-    path.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
-
-
-def load_project_state(
-    path: Path,
-    photos: list[Photo],
-) -> tuple[tuple[SeriesGroup, ...], list[ManualCorrection]]:
-    payload = json.loads(path.read_text(encoding="utf-8"))
-    by_path = {str(photo.path): photo for photo in photos}
-    for item in payload.get("photos", []):
-        photo = by_path.get(item["path"])
-        if photo is None:
-            continue
-        _restore_saved_photo(photo, item)
-    series = tuple(
-        SeriesGroup(id=int(item["id"]), photos=tuple(Path(path) for path in item["photos"]))
-        for item in payload.get("series", [])
-    )
-    corrections = [
-        ManualCorrection.from_json(item) for item in payload.get("manual_corrections", [])
-    ]
-    return series, corrections
-
-
 def _change_type(photo: Photo, keep: bool) -> str | None:
     if photo.ai_selected and not keep:
         return CHANGE_AI_REMOVED
@@ -268,42 +227,3 @@ def _photo_state(photo: Photo) -> dict[str, Any]:
 def _restore_photo_state(photo: Photo, state: dict[str, Any]) -> None:
     for key, value in state.items():
         setattr(photo, key, value)
-
-
-def _photo_to_json(photo: Photo) -> dict[str, Any]:
-    return {
-        "path": str(photo.path),
-        "selected": photo.selected,
-        "favorite": photo.favorite,
-        "tags": sorted(photo.tags),
-        "rating": photo.rating,
-        "ai_selected": photo.ai_selected,
-        "ai_score": photo.ai_score,
-        "ai_recommendation": photo.ai_recommendation,
-        "ai_analysis": photo.ai_analysis.to_json() if photo.ai_analysis is not None else None,
-        "review_status": photo.review_status,
-        "review_note": photo.review_note,
-        "series_id": photo.series_id,
-        "series_rank": photo.series_rank,
-        "selection_reason": photo.selection_reason,
-        "manual_change": photo.manual_change,
-    }
-
-
-def _restore_saved_photo(photo: Photo, data: dict[str, Any]) -> None:
-    photo.selected = bool(data.get("selected", False))
-    photo.favorite = bool(data.get("favorite", False))
-    photo.tags = set(data.get("tags", []))
-    photo.rating = int(data.get("rating", 0))
-    photo.ai_selected = bool(data.get("ai_selected", False))
-    photo.ai_score = data.get("ai_score")
-    photo.ai_recommendation = data.get("ai_recommendation")
-    photo.ai_analysis = (
-        AnalysisResult.from_json(data["ai_analysis"]) if data.get("ai_analysis") else None
-    )
-    photo.review_status = str(data.get("review_status", REVIEW_UNREVIEWED))
-    photo.review_note = data.get("review_note")
-    photo.series_id = data.get("series_id")
-    photo.series_rank = data.get("series_rank")
-    photo.selection_reason = data.get("selection_reason")
-    photo.manual_change = data.get("manual_change")

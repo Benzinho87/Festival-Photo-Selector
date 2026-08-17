@@ -5,7 +5,7 @@ from pathlib import Path
 @dataclass(frozen=True)
 class AppConfig:
     app_name: str = "B² Photo Manager"
-    version: str = "0.4.1"
+    version: str = "0.6.1"
     thumbnail_width: int = 240
     thumbnail_height: int = 170
     thumbnail_min_columns: int = 1

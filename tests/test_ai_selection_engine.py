@@ -5,6 +5,7 @@ from b2_photo_manager.services.ai.engine import SelectionEngine
 from b2_photo_manager.services.ai.models import (
     AestheticScores,
     AnalysisResult,
+    ContentFingerprint,
     PeopleScores,
     SelectionProfile,
     SelectionRequest,
@@ -13,7 +14,12 @@ from b2_photo_manager.services.ai.models import (
 )
 
 
-def attach(photo: Photo, score: float, hash_value: str) -> Photo:
+def attach(
+    photo: Photo,
+    score: float,
+    hash_value: str,
+    content: ContentFingerprint | None = None,
+) -> Photo:
     photo.ai_analysis = AnalysisResult(
         path=photo.path,
         file_signature="1:1",
@@ -25,6 +31,7 @@ def attach(photo: Photo, score: float, hash_value: str) -> Photo:
         perceptual_hash=hash_value,
         score=score,
         recommendation="",
+        content=content or ContentFingerprint.empty(),
     )
     return photo
 
@@ -54,3 +61,32 @@ def test_favorites_are_preserved_as_ai_selected() -> None:
     )
     assert favorite.ai_selected is True
     assert favorite.selected is False
+
+
+def test_content_similar_photos_do_not_dominate_selection() -> None:
+    same_content = ContentFingerprint(
+        brightness=(0.5, 0.5, 0.5, 0.5),
+        colors=(0.4, 0.35, 0.25),
+        edges=(0.2, 0.2, 0.2, 0.2),
+        warmth=0.6,
+        aspect_ratio=0.6,
+    )
+    different_content = ContentFingerprint(
+        brightness=(0.1, 0.8, 0.2, 0.7),
+        colors=(0.2, 0.5, 0.3),
+        edges=(0.8, 0.1, 0.7, 0.2),
+        warmth=0.2,
+        aspect_ratio=0.3,
+    )
+    photos = [
+        attach(Photo(Path("near-a.jpg")), 0.99, "0000000000000000", same_content),
+        attach(Photo(Path("near-b.jpg")), 0.98, "ffffffffffffffff", same_content),
+        attach(Photo(Path("different.jpg")), 0.62, "0f0f0f0f0f0f0f0f", different_content),
+    ]
+
+    summary = SelectionEngine().select(
+        photos,
+        SelectionRequest(target=SelectionTarget(count=2)),
+    )
+
+    assert summary.selected == (Path("near-a.jpg"), Path("different.jpg"))
