@@ -1,4 +1,9 @@
-from b2_photo_manager.services.export_presets import EXPORT_PRESETS, ExportFormat, presets_by_name
+from b2_photo_manager.services.export_presets import (
+    EXPORT_PRESETS,
+    ExportFormat,
+    ResizeMode,
+    presets_by_name,
+)
 
 
 def test_required_presets_are_available() -> None:
@@ -6,9 +11,9 @@ def test_required_presets_are_available() -> None:
 
     assert {
         "Website",
-        "Thumbnail",
         "Social Media",
-        "Original verkleinert",
+        "E-Mail / klein",
+        "Original",
         "Benutzerdefiniert",
     } <= names
 
@@ -24,4 +29,13 @@ def test_presets_are_addressable_by_name() -> None:
     by_name = presets_by_name()
 
     assert by_name["Website"].target_size_kb == 500
-    assert by_name["Thumbnail"].filename_prefix == "thumb"
+    assert by_name["E-Mail / klein"].filename_prefix == "thumb"
+
+
+def test_presets_normalize_to_new_size_model() -> None:
+    by_name = presets_by_name()
+
+    assert by_name["Website"].normalized().resize_mode == ResizeMode.BOUNDING_BOX
+    assert by_name["Website"].normalized().max_width == 1800
+    assert by_name["Website"].normalized().max_height == 1800
+    assert by_name["Original"].normalized().resize_mode == ResizeMode.ORIGINAL

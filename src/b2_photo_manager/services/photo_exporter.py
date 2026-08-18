@@ -7,6 +7,7 @@ from PIL import Image, ImageOps
 
 from b2_photo_manager.models.photo import Photo
 from b2_photo_manager.services.export_presets import (
+    ConflictMode,
     ExportFormat,
     ExportPreset,
     FilenameMode,
@@ -24,6 +25,7 @@ class ExportItemResult:
     success: bool
     bytes_written: int = 0
     error: str | None = None
+    skipped: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,8 +38,12 @@ class ExportSummary:
         return sum(result.success for result in self.results)
 
     @property
+    def skipped_count(self) -> int:
+        return sum(result.skipped for result in self.results)
+
+    @property
     def error_count(self) -> int:
-        return len(self.results) - self.successful_count
+        return len(self.results) - self.successful_count - self.skipped_count
 
     @property
     def total_size(self) -> int:
@@ -73,6 +79,43 @@ def build_export_filename(
     return f"{'_'.join(part for part in parts if part)}.{output_format.value}"
 
 
+def resized_dimensions(size: tuple[int, int], preset: ExportPreset) -> tuple[int, int]:
+    normalized = preset.normalized()
+    if normalized.resize_mode == ResizeMode.ORIGINAL:
+        return size
+
+    width, height = size
+    max_width = normalized.max_width or width
+    max_height = normalized.max_height or height
+    scale = min(max_width / width, max_height / height, 1.0)
+    return (max(1, round(width * scale)), max(1, round(height * scale)))
+
+
+def export_size_label(preset: ExportPreset) -> str:
+    normalized = preset.normalized()
+    if normalized.resize_mode == ResizeMode.ORIGINAL:
+        return "Originalgröße"
+    return f"max. {normalized.max_width} × {normalized.max_height} px"
+
+
+def estimate_total_size(photos: Iterable[Photo], preset: ExportPreset) -> int | None:
+    normalized = preset.normalized()
+    photo_list = list(photos)
+    if not photo_list:
+        return None
+    source_sizes = [photo.path.stat().st_size for photo in photo_list if photo.path.exists()]
+    if not source_sizes:
+        return None
+    factor = 1.0
+    if normalized.output_format == ExportFormat.WEBP:
+        factor *= 0.55
+    elif normalized.quality < 90:
+        factor *= 0.8
+    if normalized.resize_mode == ResizeMode.BOUNDING_BOX:
+        factor *= 0.65
+    return max(1, round(sum(source_sizes) * factor))
+
+
 def export_photos(
     photos: Iterable[Photo],
     destination_folder: Path,
@@ -88,18 +131,29 @@ def export_photos(
         if progress_callback is not None:
             progress_callback(index - 1, len(photo_list), photo.path)
         try:
-            destination = _next_available_destination(
-                destination_folder,
-                build_export_filename(
-                    normalized.filename_prefix,
-                    normalized.start_number + index - 1,
-                    normalized.number_padding,
-                    normalized.output_format,
-                    source=photo.path,
-                    mode=normalized.filename_mode,
-                    photographer=_photographer_for_filename(photo, normalized),
-                ),
+            filename = build_export_filename(
+                normalized.filename_prefix,
+                normalized.start_number + index - 1,
+                normalized.number_padding,
+                normalized.output_format,
+                source=photo.path,
+                mode=normalized.filename_mode,
+                photographer=_photographer_for_filename(photo, normalized),
             )
+            destination = destination_folder / filename
+            if destination.exists():
+                if normalized.conflict_mode == ConflictMode.SKIP:
+                    results.append(
+                        ExportItemResult(
+                            source=photo.path,
+                            destination=destination,
+                            success=False,
+                            skipped=True,
+                            error="Datei existiert bereits",
+                        )
+                    )
+                    continue
+                destination = _next_available_destination(destination_folder, filename)
             bytes_written = _export_one(photo.path, destination, normalized)
             results.append(
                 ExportItemResult(
@@ -171,12 +225,7 @@ def _export_one(source: Path, destination: Path, preset: ExportPreset) -> int:
 
 
 def _target_size(size: tuple[int, int], preset: ExportPreset) -> tuple[int, int]:
-    width, height = size
-    if preset.resize_mode == ResizeMode.BOUNDING_BOX:
-        return (preset.max_width or width, preset.max_height or height)
-
-    long_edge = preset.long_edge or max(width, height)
-    return (long_edge, long_edge)
+    return resized_dimensions(size, preset)
 
 
 def _save_with_target_size(

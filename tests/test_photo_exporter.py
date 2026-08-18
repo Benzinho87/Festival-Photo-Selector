@@ -4,6 +4,7 @@ from PIL import Image
 
 from b2_photo_manager.models.photo import Photo
 from b2_photo_manager.services.export_presets import (
+    ConflictMode,
     ExportFormat,
     ExportPreset,
     FilenameMode,
@@ -13,6 +14,7 @@ from b2_photo_manager.services.photo_exporter import (
     build_export_filename,
     export_photos,
     exportable_photos,
+    resized_dimensions,
 )
 
 
@@ -21,10 +23,10 @@ def _preset(**overrides) -> ExportPreset:
         "key": "test",
         "name": "Test",
         "output_format": ExportFormat.JPG,
-        "resize_mode": ResizeMode.LONG_EDGE,
-        "long_edge": 100,
-        "max_width": None,
-        "max_height": None,
+        "resize_mode": ResizeMode.BOUNDING_BOX,
+        "long_edge": None,
+        "max_width": 100,
+        "max_height": 100,
         "quality": 85,
         "keep_metadata": False,
         "filename_prefix": "event",
@@ -33,6 +35,7 @@ def _preset(**overrides) -> ExportPreset:
         "number_padding": 3,
         "include_photographer": False,
         "target_size_kb": None,
+        "conflict_mode": ConflictMode.AUTO_RENAME,
     }
     values.update(overrides)
     return ExportPreset(**values)
@@ -111,6 +114,25 @@ def test_export_resizes_and_does_not_overwrite_existing_files(tmp_path: Path) ->
     assert (destination / "event_001.jpg").read_text() == "existing"
 
 
+def test_export_can_skip_existing_files(tmp_path: Path) -> None:
+    source = tmp_path / "source.jpg"
+    destination = tmp_path / "exports"
+    destination.mkdir()
+    (destination / "event_001.jpg").write_text("existing")
+    _image(source)
+
+    summary = export_photos(
+        [Photo(source, selected=True)],
+        destination,
+        _preset(conflict_mode=ConflictMode.SKIP),
+    )
+
+    assert summary.successful_count == 0
+    assert summary.skipped_count == 1
+    assert summary.error_count == 0
+    assert not (destination / "event_001-2.jpg").exists()
+
+
 def test_export_applies_orientation_without_keeping_stale_rotation(tmp_path: Path) -> None:
     source = tmp_path / "portrait.jpg"
     _oriented_image(source)
@@ -118,7 +140,7 @@ def test_export_applies_orientation_without_keeping_stale_rotation(tmp_path: Pat
     export_photos(
         [Photo(source, selected=True)],
         tmp_path / "exports",
-        _preset(long_edge=100, keep_metadata=True),
+        _preset(max_width=100, max_height=100, keep_metadata=True),
     )
 
     with Image.open(tmp_path / "exports" / "event_001.jpg") as exported:
@@ -166,7 +188,7 @@ def test_export_target_size_reduces_large_files(tmp_path: Path) -> None:
     summary = export_photos(
         [Photo(source, selected=True)],
         tmp_path / "exports",
-        _preset(long_edge=1200, quality=95, target_size_kb=8),
+        _preset(max_width=1200, max_height=1200, quality=95, target_size_kb=8),
     )
 
     assert summary.successful_count == 1
@@ -184,3 +206,31 @@ def test_export_can_include_metadata_photographer_in_filename(tmp_path: Path) ->
     )
 
     assert (tmp_path / "exports" / "event_Erika_Musterfrau_001.jpg").exists()
+
+
+def test_resized_dimensions_preserves_landscape_and_portrait_aspect_ratio() -> None:
+    preset = _preset(max_width=2560, max_height=2560)
+
+    assert resized_dimensions((6000, 4000), preset) == (2560, 1707)
+    assert resized_dimensions((4000, 6000), preset) == (1707, 2560)
+
+
+def test_resized_dimensions_never_upscales() -> None:
+    assert resized_dimensions((800, 600), _preset(max_width=2560, max_height=2560)) == (
+        800,
+        600,
+    )
+
+
+def test_original_size_keeps_dimensions(tmp_path: Path) -> None:
+    source = tmp_path / "source.jpg"
+    _image(source, size=(400, 200))
+
+    export_photos(
+        [Photo(source, selected=True)],
+        tmp_path / "exports",
+        _preset(resize_mode=ResizeMode.ORIGINAL, max_width=None, max_height=None),
+    )
+
+    with Image.open(tmp_path / "exports" / "event_001.jpg") as exported:
+        assert exported.size == (400, 200)

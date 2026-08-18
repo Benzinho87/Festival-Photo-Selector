@@ -1,6 +1,6 @@
 # B² Photo Manager
 
-## Version 0.6.1 – Project Management, Auto-Save & Recovery
+## Version 0.6.2 – Export v2
 
 B² Photo Manager ist eine lokale Desktop-Anwendung für die schnelle Sichtung,
 AI-gestützte Auswahl, Review und den Export großer Fotoordner.
@@ -24,7 +24,12 @@ AI-gestützte Auswahl, Review und den Export großer Fotoordner.
 - stärkere Unterdrückung fast identischer AI-Auswahlbilder
 - Review-Modus nur für AI-ausgewählte Fotos
 - Reviewstatus, Serienrang, Auswahlgrund und manuelle Korrekturen
-- Exportdialog mit Qualitätswarnungen vor dem Export
+- intuitiver Exportdialog mit Auswahl, Bildgröße, Dateien & Ziel
+- Exportgröße wahlweise Originalgröße oder maximale Breite/Höhe ohne Hochskalierung
+- Live-Beispielanzeige und Zusammenfassung vor dem Export
+- Presets für Website, Social Media, E-Mail / klein, Original und Benutzerdefiniert
+- Konfliktbehandlung für vorhandene Dateien mit automatischem Umbenennen oder Überspringen
+- Exportabschluss mit Anzahl, Fehlern, übersprungenen Dateien, Gesamtgröße und Zielordner
 - reproduzierbare Python-3.12-/PySide6-6.10.3-Umgebung
 - echte Qt/Cocoa-Prüfung vor jedem Testlauf
 
