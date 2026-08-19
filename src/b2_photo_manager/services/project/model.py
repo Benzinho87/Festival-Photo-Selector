@@ -72,8 +72,12 @@ def project_to_json(project: Project) -> dict[str, Any]:
 
 def project_from_json(data: dict[str, Any], project_file: Path | None = None) -> Project:
     version = data.get("project_format_version")
-    if version != PROJECT_FORMAT_VERSION:
-        raise ProjectFileError("unsupported project format")
+    if not isinstance(version, int):
+        raise ProjectFileError("missing project format version")
+    if version > PROJECT_FORMAT_VERSION:
+        raise ProjectFileError("project format is newer than this app supports")
+    if version < PROJECT_FORMAT_VERSION:
+        raise ProjectFileError("unsupported older project format")
     try:
         photos = [_photo_from_json(item) for item in data.get("photos", [])]
         missing = tuple(photo.path for photo in photos if not photo.path.exists())

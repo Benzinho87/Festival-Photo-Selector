@@ -1,4 +1,5 @@
 import logging
+from datetime import UTC, datetime
 from pathlib import Path
 
 from PySide6.QtCore import Qt, QThreadPool
@@ -23,6 +24,7 @@ from PySide6.QtWidgets import (
 
 from b2_photo_manager.config import CONFIG
 from b2_photo_manager.models.photo import Photo
+from b2_photo_manager.runtime_paths import runtime_paths
 from b2_photo_manager.services.ai.models import SelectionProfile, SelectionRequest, SelectionTarget
 from b2_photo_manager.services.ai.worker import SelectionWorker
 from b2_photo_manager.services.gallery_layout import calculate_columns
@@ -53,18 +55,47 @@ from b2_photo_manager.services.project import (
 from b2_photo_manager.services.review import (
     ReviewHistory,
     apply_series_groups,
+    choose_series_best,
     mark_review_decision,
     quality_warnings,
     review_photos,
     review_progress,
 )
 from b2_photo_manager.services.thumbnail_service import ThumbnailWorker
+from b2_photo_manager.ui.diagnostics_dialog import DiagnosticsDialog
 from b2_photo_manager.ui.export_dialog import ExportDialog
 from b2_photo_manager.ui.photo_card import PhotoCard
 from b2_photo_manager.ui.preview_dialog import PreviewDialog
+from b2_photo_manager.ui.quality_check_dialog import QualityCheckDialog
+from b2_photo_manager.ui.series_compare_dialog import SeriesCompareDialog
 from b2_photo_manager.ui.tag_dialog import TagDialog
 
 LOGGER = logging.getLogger(__name__)
+RECENT_PROJECT_LABEL_LIMIT = 34
+
+
+def _compact_project_name(name: str) -> str:
+    if len(name) <= RECENT_PROJECT_LABEL_LIMIT:
+        return name
+    keep = (RECENT_PROJECT_LABEL_LIMIT - 3) // 2
+    tail = RECENT_PROJECT_LABEL_LIMIT - 3 - keep
+    return f"{name[:keep]}...{name[-tail:]}"
+
+
+def _export_history_entry(summary, preset) -> dict:
+    return {
+        "timestamp": datetime.now(UTC).isoformat(),
+        "destination": str(summary.destination_folder),
+        "successful_count": summary.successful_count,
+        "skipped_count": summary.skipped_count,
+        "error_count": summary.error_count,
+        "format": preset.output_format.value,
+        "resize_mode": preset.resize_mode.value,
+        "preset": preset.name,
+        "quality": preset.quality,
+        "max_width": preset.max_width,
+        "max_height": preset.max_height,
+    }
 
 
 class MainWindow(QMainWindow):
@@ -77,14 +108,16 @@ class MainWindow(QMainWindow):
         self.thread_pool = QThreadPool.globalInstance()
         self.selection_worker: SelectionWorker | None = None
         self.analysis_running = False
+        self.load_generation = 0
+        self.analysis_generation = 0
         self.thumbnail_width = CONFIG.thumbnail_width
         self.series = ()
         self.manual_corrections = []
         self.history = ReviewHistory()
         self.project: Project | None = None
-        self.project_store = ProjectStore()
         self.recent_projects = RecentProjects()
         self.recovery_manager = RecoveryManager()
+        self.project_store = ProjectStore(self.recovery_manager)
         self.autosave = AutoSaveController(self.project_store, self.recovery_manager)
 
         self.setWindowTitle(f"{CONFIG.app_name} {CONFIG.version}")
@@ -134,6 +167,10 @@ class MainWindow(QMainWindow):
         review_action.triggered.connect(self.open_review_mode)
         toolbar.addAction(review_action)
 
+        series_action = QAction("Serien vergleichen", self)
+        series_action.triggered.connect(self.open_series_compare)
+        toolbar.addAction(series_action)
+
         undo_action = QAction("Undo", self)
         undo_action.triggered.connect(self.undo)
         toolbar.addAction(undo_action)
@@ -141,6 +178,11 @@ class MainWindow(QMainWindow):
         redo_action = QAction("Redo", self)
         redo_action.triggered.connect(self.redo)
         toolbar.addAction(redo_action)
+        toolbar.addSeparator()
+
+        diagnostics_action = QAction("Diagnose", self)
+        diagnostics_action.triggered.connect(self.open_diagnostics)
+        toolbar.addAction(diagnostics_action)
 
     def _build_content(self) -> None:
         self.heading = QLabel(CONFIG.app_name)
@@ -192,6 +234,11 @@ class MainWindow(QMainWindow):
         self.tag_filter_combo.currentTextChanged.connect(self._apply_filter)
 
         self.recent_combo = QComboBox()
+        self.recent_combo.setMaximumWidth(240)
+        self.recent_combo.setMinimumContentsLength(12)
+        self.recent_combo.setSizeAdjustPolicy(
+            QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon
+        )
         self.recent_combo.currentIndexChanged.connect(self._open_recent_project)
         self._refresh_recent_projects()
 
@@ -258,6 +305,8 @@ class MainWindow(QMainWindow):
         )
         if not selected:
             return
+        if not self._prepare_project_switch():
+            return
 
         try:
             paths = find_photos(Path(selected))
@@ -280,7 +329,9 @@ class MainWindow(QMainWindow):
     def load_photos(self, paths: list[Path]) -> None:
         self._load_photo_objects([Photo(path=path) for path in paths])
 
-    def _load_photo_objects(self, photos: list[Photo]) -> None:
+    def _load_photo_objects(self, photos: list[Photo], mark_dirty: bool = True) -> None:
+        self.load_generation += 1
+        generation = self.load_generation
         self._clear_grid()
         self.photos = photos
         self.cards = {}
@@ -298,13 +349,22 @@ class MainWindow(QMainWindow):
             self.cards[photo.path] = card
 
             worker = ThumbnailWorker(photo.path)
-            worker.signals.loaded.connect(self._on_thumbnail_loaded)
-            worker.signals.failed.connect(self._on_thumbnail_failed)
+            worker.signals.loaded.connect(
+                lambda path, image, item=generation: self._on_thumbnail_loaded(
+                    path, image, item
+                )
+            )
+            worker.signals.failed.connect(
+                lambda path, message, item=generation: self._on_thumbnail_failed(
+                    path, message, item
+                )
+            )
             self.thread_pool.start(worker)
 
         self._refresh_tag_filter()
         self._relayout_gallery(force=True)
-        self._mark_project_dirty()
+        if mark_dirty:
+            self._mark_project_dirty()
         self._update_status()
 
     def _default_project_file(self, source_folder: Path) -> Path:
@@ -334,6 +394,8 @@ class MainWindow(QMainWindow):
             self.load_project(Path(selected))
 
     def load_project(self, path: Path) -> None:
+        if not self._prepare_project_switch():
+            return
         load_path = path
         recovery = self.recovery_manager.inspect(path)
         if recovery.autosave_file is not None:
@@ -373,7 +435,7 @@ class MainWindow(QMainWindow):
         self.manual_corrections = project.snapshot.manual_corrections
         self.history = ReviewHistory()
         self.autosave.set_project(project)
-        self._load_photo_objects(project.snapshot.photos)
+        self._load_photo_objects(project.snapshot.photos, mark_dirty=False)
         self.recent_projects.add(path)
         self._refresh_recent_projects()
         if project.snapshot.missing_photos:
@@ -383,6 +445,25 @@ class MainWindow(QMainWindow):
                 f"{len(project.snapshot.missing_photos)} gespeicherte Fotos wurden nicht gefunden. "
                 "Das Projekt wurde soweit möglich geöffnet.",
             )
+
+    def _prepare_project_switch(self) -> bool:
+        self.analysis_generation += 1
+        if self.selection_worker is not None:
+            self.selection_worker.cancel()
+        self.analysis_running = False
+        self.selection_worker = None
+        if self.project is None or not self.project.dirty:
+            return True
+        self._sync_project_snapshot()
+        if self.autosave.save_if_dirty():
+            return True
+        QMessageBox.warning(
+            self,
+            "Projekt nicht gesichert",
+            "Die aktuellen Änderungen konnten nicht automatisch gesichert werden. "
+            "Bitte speichere das Projekt manuell und versuche es danach erneut.",
+        )
+        return False
 
     def save_project(self) -> None:
         if self.project is None:
@@ -425,7 +506,9 @@ class MainWindow(QMainWindow):
         self.recent_combo.clear()
         self.recent_combo.addItem("–", None)
         for path in self.recent_projects.list():
-            self.recent_combo.addItem(path.name, str(path))
+            index = self.recent_combo.count()
+            self.recent_combo.addItem(_compact_project_name(path.name), str(path))
+            self.recent_combo.setItemData(index, str(path), Qt.ItemDataRole.ToolTipRole)
         self.recent_combo.blockSignals(False)
 
     def _open_recent_project(self, index: int) -> None:
@@ -499,14 +582,20 @@ class MainWindow(QMainWindow):
         self.current_columns = 0
         self._relayout_gallery(force=True)
 
-    def _on_thumbnail_loaded(self, path: Path, image: QImage) -> None:
+    def _on_thumbnail_loaded(
+        self, path: Path, image: QImage, generation: int | None = None
+    ) -> None:
+        if generation is not None and generation != self.load_generation:
+            return
         card = self.cards.get(path)
         if card is not None:
             card.set_thumbnail(QPixmap.fromImage(image))
         self.loaded_count += 1
         self._update_status()
 
-    def _on_thumbnail_failed(self, path: Path, message: str) -> None:
+    def _on_thumbnail_failed(self, path: Path, message: str, generation: int | None = None) -> None:
+        if generation is not None and generation != self.load_generation:
+            return
         LOGGER.warning("Thumbnail failed for %s: %s", path, message)
         card = self.cards.get(path)
         if card is not None:
@@ -520,6 +609,7 @@ class MainWindow(QMainWindow):
             card.refresh_style()
         self._refresh_tag_filter()
         self._relayout_gallery(force=True)
+        self._mark_project_dirty()
         self._update_status()
 
     def open_review_mode(self) -> None:
@@ -554,11 +644,42 @@ class MainWindow(QMainWindow):
         if photo is not None:
             self._on_photo_changed(photo)
 
+    def open_series_compare(self, series_id: int | None = None) -> None:
+        if not any(photo.series_id is not None for photo in self.photos):
+            QMessageBox.information(
+                self,
+                "Keine Serien",
+                "Es sind noch keine AI-Serien vorhanden. Bitte zuerst eine AI-Auswahl starten.",
+            )
+            return
+        dialog = SeriesCompareDialog(self.photos, series_id, self)
+        dialog.winner_selected.connect(self._choose_series_winner)
+        dialog.selection_changed.connect(self._on_photo_changed)
+        dialog.exec()
+        self._relayout_gallery(force=True)
+        self._mark_project_dirty()
+        self._update_status()
+
+    def _choose_series_winner(self, series_id: int, path: Path) -> None:
+        choose_series_best(
+            self.photos,
+            series_id,
+            path,
+            self.manual_corrections,
+            self.history,
+        )
+        for photo in self.photos:
+            if photo.series_id == series_id:
+                self._on_photo_changed(photo)
+
     def _edit_tags(self, photo: Photo) -> None:
         dialog = TagDialog(photo, self)
         if dialog.exec():
             photo.tags = dialog.parsed_tags()
             self._on_photo_changed(photo)
+
+    def open_diagnostics(self) -> None:
+        DiagnosticsDialog(self).exec()
 
     def _refresh_tag_filter(self) -> None:
         current = self.tag_filter_combo.currentText() or ALL_TAGS
@@ -618,11 +739,21 @@ class MainWindow(QMainWindow):
             profile=profile,
             target=SelectionTarget(count=self.target_spin.value()),
         )
-        cache_file = Path("cache") / "ai-analysis-v2.json"
+        cache_file = runtime_paths().ai_cache_dir / "ai-analysis-v2.json"
+        self.analysis_generation += 1
+        generation = self.analysis_generation
         self.selection_worker = SelectionWorker(self.photos, request, cache_file)
-        self.selection_worker.signals.progress.connect(self._on_ai_progress)
-        self.selection_worker.signals.finished.connect(self._on_ai_finished)
-        self.selection_worker.signals.failed.connect(self._on_ai_failed)
+        self.selection_worker.signals.progress.connect(
+            lambda done, total, path, item=generation: self._on_ai_progress(
+                done, total, path, item
+            )
+        )
+        self.selection_worker.signals.finished.connect(
+            lambda summary, item=generation: self._on_ai_finished(summary, item)
+        )
+        self.selection_worker.signals.failed.connect(
+            lambda message, item=generation: self._on_ai_failed(message, item)
+        )
         self.analysis_running = True
         self.ai_button.setEnabled(False)
         self.cancel_ai_button.setEnabled(True)
@@ -635,11 +766,17 @@ class MainWindow(QMainWindow):
         self.cancel_ai_button.setEnabled(False)
         self.statusBar().showMessage("AI-Analyse wird abgebrochen …")
 
-    def _on_ai_progress(self, done: int, total: int, path: Path) -> None:
+    def _on_ai_progress(
+        self, done: int, total: int, path: Path, generation: int | None = None
+    ) -> None:
+        if generation is not None and generation != self.analysis_generation:
+            return
         name = path.name if path and path.name else "Auswahl wird berechnet"
         self.statusBar().showMessage(f"AI-Analyse: {done}/{total} · {name}")
 
-    def _on_ai_finished(self, summary) -> None:
+    def _on_ai_finished(self, summary, generation: int | None = None) -> None:
+        if generation is not None and generation != self.analysis_generation:
+            return
         self.analysis_running = False
         self.selection_worker = None
         self.ai_button.setEnabled(True)
@@ -657,7 +794,9 @@ class MainWindow(QMainWindow):
             f"{len(summary.series)} Serien{error_note}"
         )
 
-    def _on_ai_failed(self, message: str) -> None:
+    def _on_ai_failed(self, message: str, generation: int | None = None) -> None:
+        if generation is not None and generation != self.analysis_generation:
+            return
         self.analysis_running = False
         self.selection_worker = None
         self.ai_button.setEnabled(True)
@@ -677,17 +816,32 @@ class MainWindow(QMainWindow):
             return
         warnings = quality_warnings(self.photos)
         if warnings:
-            answer = QMessageBox.question(
-                self,
-                "Qualitätscheck",
-                f"{len(warnings)} Warnungen gefunden. Trotzdem Export öffnen?",
-            )
-            if answer != QMessageBox.StandardButton.Yes:
+            dialog = QualityCheckDialog(self.photos, self)
+            dialog.show_photo_requested.connect(self._open_preview)
+            dialog.compare_series_requested.connect(self.open_series_compare)
+            dialog.remove_from_selection_requested.connect(self._remove_from_selection)
+            if not dialog.exec():
                 self.filter_combo.setCurrentText(FILTER_SELECTED)
                 return
         self.save_project()
         dialog = ExportDialog(self.photos, self)
+        dialog.export_completed.connect(self._record_export_summary)
         dialog.exec()
+
+    def _remove_from_selection(self, path: Path) -> None:
+        photo = next((item for item in self.photos if item.path == path), None)
+        if photo is None or not photo.selected:
+            return
+        mark_review_decision(photo, False, self.manual_corrections, self.history)
+        self._on_photo_changed(photo)
+
+    def _record_export_summary(self, summary, preset) -> None:
+        if self.project is None:
+            return
+        history = list(self.project.snapshot.export_info.get("history", []))
+        history.append(_export_history_entry(summary, preset))
+        self.project.snapshot.export_info["history"] = history[-20:]
+        self._mark_project_dirty()
 
     def _update_status(self) -> None:
         total = len(self.photos)

@@ -1,6 +1,6 @@
 # B² Photo Manager
 
-## Version 0.6.2 – Export v2
+## Version 0.6.3 – Release Hardening & Packaging Preparation
 
 B² Photo Manager ist eine lokale Desktop-Anwendung für die schnelle Sichtung,
 AI-gestützte Auswahl, Review und den Export großer Fotoordner.
@@ -24,14 +24,47 @@ AI-gestützte Auswahl, Review und den Export großer Fotoordner.
 - stärkere Unterdrückung fast identischer AI-Auswahlbilder
 - Review-Modus nur für AI-ausgewählte Fotos
 - Reviewstatus, Serienrang, Auswahlgrund und manuelle Korrekturen
+- Serienvergleich für erkannte AI-Serien mit AI-Score, Rang, Favorit, Fit und 100-%-Zoom
+- Seriengewinner per Klick oder Taste 1–4, gespeichert als Undo-/Redo-fähiger `series_override`
+- bewusste Mehrfachauswahl innerhalb einer Serie bleibt möglich
+- erklärbarer Qualitätscheck vor dem Export mit gruppierten Ursachen, betroffenen Fotos und Aktionen
+- direkte Navigation aus Qualitätswarnungen zum Bild oder zur betroffenen Serie
 - intuitiver Exportdialog mit Auswahl, Bildgröße, Dateien & Ziel
 - Exportgröße wahlweise Originalgröße oder maximale Breite/Höhe ohne Hochskalierung
 - Live-Beispielanzeige und Zusammenfassung vor dem Export
 - Presets für Website, Social Media, E-Mail / klein, Original und Benutzerdefiniert
 - Konfliktbehandlung für vorhandene Dateien mit automatischem Umbenennen oder Überspringen
 - Exportabschluss mit Anzahl, Fehlern, übersprungenen Dateien, Gesamtgröße und Zielordner
+- kompakte Export-Historie im Projekt
+- Runtime-Daten außerhalb des Repositories unter macOS-Library-Pfaden
+- zentrale Resource-Auflösung über `b2_photo_manager.resources.resource_path()`
+- eindeutiger Startpunkt über `b2_photo_manager.cli.main()`
+- rotierende Logdatei und Diagnoseansicht für Support/Packaging
+- Schutz vor veralteten Worker-Rückmeldungen nach Projektwechsel
 - reproduzierbare Python-3.12-/PySide6-6.10.3-Umgebung
 - echte Qt/Cocoa-Prüfung vor jedem Testlauf
+
+## Runtime-Datenorte
+
+Projektdateien `.b2project` bleiben an dem Ort, den du beim Speichern auswählst.
+Runtime-Daten werden nicht im Repository abgelegt.
+
+```text
+~/Library/Application Support/B2 Photo Manager/
+  recent-projects.json
+  recovery/
+  settings/
+
+~/Library/Caches/B2 Photo Manager/
+  ai/
+  thumbnails/
+
+~/Library/Logs/B2 Photo Manager/
+  b2-photo-manager.log
+```
+
+Exportziele bleiben frei wählbar. Als Vorschlag nutzt die App
+`~/Pictures/B2 Photo Manager Exports`.
 
 ## Entwicklungsumgebung
 
@@ -76,8 +109,11 @@ Der Check prüft:
 3. echte Qt-/Cocoa-Initialisierung auf macOS
 4. Repository-Hygiene / Finder-Dubletten
 5. verdächtige Git-Referenz-Dubletten
-6. Ruff
-7. Pytest
+6. Versionskonsistenz
+7. keine Runtime-Artefakte im Repository
+8. Packaging-Vorbedingungen: keine manuellen Qt-Plugin-Pfade, keine relativen Runtime-Pfade
+9. Ruff
+10. Pytest
 
 Nur wenn alle Prüfungen grün sind, wird committed.
 
@@ -97,8 +133,17 @@ Repository und baut die externe Umgebung neu auf.
 3. AI-Auswahl starten
 4. AI-ausgewählte Fotos im Review-Modus prüfen
 5. Tags, Favoriten und manuelle Korrekturen setzen
-6. Export mit Qualitätscheck öffnen
-7. Projekt später wieder öffnen und exakt weiterarbeiten
+6. Serien vergleichen
+7. Export mit Qualitätscheck öffnen
+8. Projekt später wieder öffnen und exakt weiterarbeiten
+
+## Release-Checkliste
+
+1. `./scripts/check.sh`
+2. Smoke-Test: Start, Projekt öffnen, AI-Auswahl, Review, Serienvergleich, Qualitätscheck, Export
+3. Version in App, Paket und README prüfen
+4. Git-Status prüfen
+5. Sicherstellen, dass keine Runtime-Daten committed werden
 
 ## Arbeitsweise
 
@@ -108,3 +153,6 @@ Repository und baut die externe Umgebung neu auf.
 - Keine `.venv` in Git oder im Projektordner.
 - Keine manuellen Qt-Plugin-Pfade.
 - Start ausschließlich über `scripts/run.sh`.
+- Für spätere `.app`-Bundles darf Code nicht annehmen, dass `src/`, `cache/`
+  oder Repository-Dateien neben der App liegen.
+- Assets immer über `b2_photo_manager.resources.resource_path()` auflösen.

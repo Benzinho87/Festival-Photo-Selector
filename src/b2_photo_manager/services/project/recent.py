@@ -3,14 +3,12 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-
-def app_support_dir() -> Path:
-    return Path.home() / "Library" / "Application Support" / "B2 Photo Manager"
+from b2_photo_manager.runtime_paths import runtime_paths
 
 
 class RecentProjects:
     def __init__(self, path: Path | None = None, limit: int = 5) -> None:
-        self.path = path or app_support_dir() / "recent-projects.json"
+        self.path = path or runtime_paths().recent_projects_file
         self.limit = limit
 
     def list(self) -> list[Path]:

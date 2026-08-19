@@ -10,9 +10,13 @@ from b2_photo_manager.services.project.model import (
     project_from_json,
     project_to_json,
 )
+from b2_photo_manager.services.project.recovery import RecoveryManager
 
 
 class ProjectStore:
+    def __init__(self, recovery: RecoveryManager | None = None) -> None:
+        self.recovery = recovery or RecoveryManager()
+
     def save(self, project: Project, path: Path | None = None) -> None:
         target = path or project.project_file
         if target is None:
@@ -30,6 +34,7 @@ class ProjectStore:
             sort_keys=True,
         )
         self._atomic_write(target, payload)
+        self.recovery.clear_autosave(target)
         project.dirty = False
         project.last_save_failed = False
 

@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 import pytest
@@ -97,16 +98,37 @@ def test_corrupt_project_file_raises_clean_error(tmp_path: Path) -> None:
         ProjectStore().load(path)
 
 
+def test_future_project_format_is_rejected_clearly(tmp_path: Path) -> None:
+    project = make_project(tmp_path)
+    payload = project_to_json(project)
+    payload["project_format_version"] = PROJECT_FORMAT_VERSION + 1
+    path = tmp_path / "future.b2project"
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+    with pytest.raises(ProjectFileError, match="newer"):
+        ProjectStore().load(path)
+
+
 def test_recovery_manager_detects_newer_autosave(tmp_path: Path) -> None:
     project_file = tmp_path / "Festival.b2project"
-    autosave = tmp_path / "Festival.b2project.autosave"
+    recovery = RecoveryManager(tmp_path / "recovery")
+    autosave = recovery.recovery_file_for(project_file)
+    autosave.parent.mkdir(parents=True)
     project_file.write_text("old", encoding="utf-8")
     autosave.write_text("new", encoding="utf-8")
 
-    info = RecoveryManager().inspect(project_file)
+    info = recovery.inspect(project_file)
 
     assert info.autosave_file == autosave
     assert info.has_recovery is True
+
+
+def test_recovery_files_do_not_collide_for_same_project_name(tmp_path: Path) -> None:
+    recovery = RecoveryManager(tmp_path / "recovery")
+    first = tmp_path / "first" / "Festival.b2project"
+    second = tmp_path / "second" / "Festival.b2project"
+
+    assert recovery.recovery_file_for(first) != recovery.recovery_file_for(second)
 
 
 def test_store_keeps_backup_on_second_save(tmp_path: Path) -> None:
@@ -151,12 +173,44 @@ def test_dirty_state_and_autosave_without_timing(tmp_path: Path) -> None:
     _ = app
     project = make_project(tmp_path)
     project.project_file = tmp_path / "Festival.b2project"
-    store = ProjectStore()
-    autosave = AutoSaveController(store, RecoveryManager(), debounce_ms=1, interval_ms=100000)
+    recovery = RecoveryManager(tmp_path / "recovery")
+    store = ProjectStore(recovery)
+    autosave = AutoSaveController(store, recovery, debounce_ms=1, interval_ms=100000)
     autosave.set_project(project)
 
     autosave.mark_dirty()
     assert project.dirty is True
     assert autosave.save_if_dirty() is True
 
-    assert (tmp_path / "Festival.b2project.autosave").exists()
+    assert recovery.recovery_file_for(project.project_file).exists()
+
+    store.save(project)
+    assert not recovery.recovery_file_for(project.project_file).exists()
+
+
+def test_series_override_persists_through_autosave(tmp_path: Path) -> None:
+    app = QApplication.instance() or QApplication([])
+    _ = app
+    first_path = tmp_path / "a.jpg"
+    second_path = tmp_path / "b.jpg"
+    first_path.write_bytes(b"image")
+    second_path.write_bytes(b"image")
+    first = Photo(first_path, selected=False, series_id=9, manual_change="series_override")
+    second = Photo(second_path, selected=True, series_id=9, review_status="kept")
+    project = Project.new(tmp_path, [first, second])
+    project.project_file = tmp_path / "Festival.b2project"
+    project.snapshot.manual_corrections = [
+        ManualCorrection(second_path, "series_override", False, True, 9)
+    ]
+    recovery = RecoveryManager(tmp_path / "recovery")
+    store = ProjectStore(recovery)
+    autosave = AutoSaveController(store, recovery, debounce_ms=1, interval_ms=100000)
+    autosave.set_project(project)
+
+    autosave.mark_dirty()
+    assert autosave.save_if_dirty() is True
+
+    loaded = store.load(recovery.recovery_file_for(project.project_file))
+    assert loaded.snapshot.photos[0].manual_change == "series_override"
+    assert loaded.snapshot.photos[1].selected is True
+    assert loaded.snapshot.manual_corrections[0].change_type == "series_override"

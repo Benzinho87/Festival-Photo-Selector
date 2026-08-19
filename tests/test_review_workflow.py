@@ -10,13 +10,18 @@ from b2_photo_manager.services.ai.models import (
 )
 from b2_photo_manager.services.review import (
     CHANGE_AI_REMOVED,
+    CHANGE_SERIES_OVERRIDE,
+    REVIEW_KEPT,
     REVIEW_REMOVED,
     ReviewHistory,
     apply_series_groups,
+    choose_series_best,
+    grouped_quality_warnings,
     mark_review_decision,
     quality_warnings,
     review_photos,
     review_progress,
+    unresolved_series_ids,
 )
 
 
@@ -81,3 +86,56 @@ def test_quality_warnings_detect_blur_duplicates_and_series_overlap() -> None:
     warning_types = {warning.warning_type for warning in quality_warnings([first, second])}
 
     assert {"blur", "exposure", "duplicate", "series_overlap"} <= warning_types
+
+
+def test_choose_series_best_records_override_and_supports_undo_redo() -> None:
+    first = Photo(Path("a.jpg"), selected=True, series_id=7, series_rank=2)
+    second = Photo(Path("b.jpg"), selected=False, series_id=7, series_rank=1)
+    other = Photo(Path("c.jpg"), selected=True, series_id=8)
+    corrections = []
+    history = ReviewHistory()
+
+    choose_series_best([first, second, other], 7, second.path, corrections, history)
+
+    assert first.selected is False
+    assert second.selected is True
+    assert second.review_status == REVIEW_KEPT
+    assert {item.change_type for item in corrections} == {CHANGE_SERIES_OVERRIDE}
+    assert {item.path for item in corrections} == {first.path, second.path}
+    assert other.selected is True
+
+    history.undo()
+    history.undo()
+    assert first.selected is True
+    assert second.selected is False
+
+    history.redo()
+    history.redo()
+    assert first.selected is False
+    assert second.selected is True
+
+
+def test_unresolved_series_ids_skip_series_after_override() -> None:
+    first = Photo(Path("a.jpg"), selected=True, series_id=1)
+    second = Photo(Path("b.jpg"), selected=False, series_id=1)
+    third = Photo(Path("c.jpg"), selected=True, series_id=2)
+    fourth = Photo(Path("d.jpg"), selected=False, series_id=2, manual_change=CHANGE_SERIES_OVERRIDE)
+
+    assert unresolved_series_ids([first, second, third, fourth]) == [1]
+
+
+def test_grouped_quality_warnings_are_ordered_and_explain_causes() -> None:
+    first = Photo(Path("a.jpg"), selected=True, series_id=1)
+    first.ai_analysis = analysis(first.path, 0.2, "same")
+    second = Photo(Path("b.jpg"), selected=True, series_id=1)
+    second.ai_analysis = analysis(second.path, 0.9, "same")
+
+    groups = grouped_quality_warnings(quality_warnings([first, second]))
+
+    assert [group.warning_type for group in groups] == [
+        "blur",
+        "exposure",
+        "duplicate",
+        "series_overlap",
+    ]
+    assert groups[-1].affected_paths == (first.path, second.path)

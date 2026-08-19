@@ -2,7 +2,10 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from enum import Enum
+from hashlib import sha256
 from pathlib import Path
+
+from b2_photo_manager.runtime_paths import runtime_paths
 
 
 class RecoveryChoice(str, Enum):
@@ -22,8 +25,13 @@ class RecoveryInfo:
 
 
 class RecoveryManager:
+    def __init__(self, recovery_dir: Path | None = None) -> None:
+        self.recovery_dir = recovery_dir or runtime_paths().recovery_dir
+
     def recovery_file_for(self, project_file: Path) -> Path:
-        return project_file.with_suffix(f"{project_file.suffix}.autosave")
+        resolved = str(project_file.expanduser().resolve())
+        digest = sha256(resolved.encode("utf-8")).hexdigest()[:16]
+        return self.recovery_dir / f"{project_file.stem}-{digest}.b2project.autosave"
 
     def backup_file_for(self, project_file: Path) -> Path:
         return project_file.with_suffix(f"{project_file.suffix}.bak")
@@ -42,3 +50,9 @@ class RecoveryManager:
     def best_recovery_path(self, project_file: Path) -> Path | None:
         info = self.inspect(project_file)
         return info.autosave_file or info.backup_file
+
+    def clear_autosave(self, project_file: Path) -> None:
+        try:
+            self.recovery_file_for(project_file).unlink(missing_ok=True)
+        except OSError:
+            pass

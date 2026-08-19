@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PIL import Image, ImageOps
-from PySide6.QtCore import QSettings, Qt
+from PySide6.QtCore import QSettings, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 )
 
 from b2_photo_manager.models.photo import Photo
+from b2_photo_manager.runtime_paths import runtime_paths
 from b2_photo_manager.services.export_presets import (
     ConflictMode,
     ExportFormat,
@@ -38,12 +39,21 @@ from b2_photo_manager.services.photo_exporter import (
 from b2_photo_manager.services.photo_metadata import format_file_size
 
 
+def default_export_directory() -> Path:
+    return Path.home() / "Pictures" / "B2 Photo Manager Exports"
+
+
 class ExportDialog(QDialog):
+    export_completed = Signal(object, object)
+
     def __init__(self, photos: list[Photo], parent=None) -> None:
         super().__init__(parent)
         self.photos = photos
         self.presets = presets_by_name()
-        self.settings = QSettings("B2", "Photo Manager")
+        self.settings = QSettings(
+            str(runtime_paths().settings_dir / "export.ini"),
+            QSettings.Format.IniFormat,
+        )
         self.setWindowTitle("Fotos exportieren")
         self.setMinimumWidth(620)
 
@@ -82,7 +92,7 @@ class ExportDialog(QDialog):
         self.conflict_combo.addItem("Automatisch umbenennen", ConflictMode.AUTO_RENAME.value)
         self.conflict_combo.addItem("Vorhandene Dateien überspringen", ConflictMode.SKIP.value)
 
-        self.destination_edit = QLineEdit(str(Path.cwd() / "exports"))
+        self.destination_edit = QLineEdit(str(default_export_directory()))
         choose_destination_button = QPushButton("Zielordner wählen")
         choose_destination_button.clicked.connect(self._choose_destination)
 
@@ -305,6 +315,7 @@ class ExportDialog(QDialog):
             progress_callback=lambda done, total, _path: self.progress.setValue(done),
         )
         self._save_last_settings()
+        self.export_completed.emit(summary, self._preset_from_form())
         self.progress.setValue(len(photos))
         self.export_button.setEnabled(True)
 

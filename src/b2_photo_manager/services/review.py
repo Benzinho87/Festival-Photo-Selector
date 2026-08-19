@@ -15,6 +15,8 @@ REVIEW_REMOVED = "removed"
 CHANGE_AI_REMOVED = "ai_removed"
 CHANGE_MANUAL_ADDED = "manual_added"
 CHANGE_SERIES_OVERRIDE = "series_override"
+BLUR_SHARPNESS_THRESHOLD = 0.45
+EXPOSURE_WARNING_THRESHOLD = 0.35
 
 
 @dataclass(frozen=True, slots=True)
@@ -49,6 +51,23 @@ class QualityWarning:
     warning_type: str
     message: str
     related_paths: tuple[Path, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class QualityWarningGroup:
+    warning_type: str
+    title: str
+    explanation: str
+    warnings: tuple[QualityWarning, ...]
+
+    @property
+    def affected_paths(self) -> tuple[Path, ...]:
+        paths: list[Path] = []
+        for warning in self.warnings:
+            for path in (warning.path, *warning.related_paths):
+                if path not in paths:
+                    paths.append(path)
+        return tuple(paths)
 
 
 class ReviewHistory:
@@ -165,6 +184,26 @@ def choose_series_best(
             )
 
 
+def series_map(photos: list[Photo]) -> dict[int, list[Photo]]:
+    by_series: dict[int, list[Photo]] = {}
+    for photo in photos:
+        if photo.series_id is not None:
+            by_series.setdefault(photo.series_id, []).append(photo)
+    return {
+        series_id: sorted(series_photos, key=lambda item: item.series_rank or 9999)
+        for series_id, series_photos in by_series.items()
+    }
+
+
+def unresolved_series_ids(photos: list[Photo]) -> list[int]:
+    return [
+        series_id
+        for series_id, series_photos in series_map(photos).items()
+        if len(series_photos) > 1
+        and not any(photo.manual_change == CHANGE_SERIES_OVERRIDE for photo in series_photos)
+    ]
+
+
 def quality_warnings(photos: list[Photo]) -> list[QualityWarning]:
     selected = [photo for photo in photos if photo.selected]
     warnings: list[QualityWarning] = []
@@ -174,9 +213,12 @@ def quality_warnings(photos: list[Photo]) -> list[QualityWarning]:
         result = photo.ai_analysis
         if result is None:
             continue
-        if result.technical.sharpness < 0.45:
+        if result.technical.sharpness < BLUR_SHARPNESS_THRESHOLD:
             warnings.append(QualityWarning(photo.path, "blur", "Ausgewähltes Bild wirkt unscharf."))
-        if result.technical.exposure < 0.35 or result.technical.clipping < 0.35:
+        if (
+            result.technical.exposure < EXPOSURE_WARNING_THRESHOLD
+            or result.technical.clipping < EXPOSURE_WARNING_THRESHOLD
+        ):
             warnings.append(
                 QualityWarning(photo.path, "exposure", "Ausgewähltes Bild ist sehr dunkel/hell.")
             )
@@ -205,6 +247,48 @@ def quality_warnings(photos: list[Photo]) -> list[QualityWarning]:
                 )
             )
     return warnings
+
+
+def grouped_quality_warnings(warnings: list[QualityWarning]) -> list[QualityWarningGroup]:
+    order = ["blur", "exposure", "duplicate", "series_overlap"]
+    labels = {
+        "blur": (
+            "Möglicherweise unscharfe Bilder",
+            "Die vorhandene technische Analyse meldet eine niedrige Schärfe.",
+        ),
+        "exposure": (
+            "Sehr dunkle oder helle Bilder",
+            "Belichtung oder Clipping liegen im kritischen Bereich.",
+        ),
+        "duplicate": (
+            "Sehr ähnliche Bilder",
+            "Ausgewählte Fotos teilen denselben Inhalts-Fingerprint.",
+        ),
+        "series_overlap": (
+            "Mehrere ausgewählte Bilder derselben Serie",
+            "Innerhalb einer erkannten Serie sind mehrere Varianten ausgewählt.",
+        ),
+    }
+    by_type: dict[str, list[QualityWarning]] = {}
+    for warning in warnings:
+        by_type.setdefault(warning.warning_type, []).append(warning)
+    groups: list[QualityWarningGroup] = []
+    for warning_type in order:
+        typed = tuple(by_type.pop(warning_type, []))
+        if not typed:
+            continue
+        title, explanation = labels[warning_type]
+        groups.append(QualityWarningGroup(warning_type, title, explanation, typed))
+    for warning_type, typed in sorted(by_type.items()):
+        groups.append(
+            QualityWarningGroup(
+                warning_type,
+                "Weitere Hinweise",
+                "Diese Hinweise sollten vor dem Export kurz geprüft werden.",
+                tuple(typed),
+            )
+        )
+    return groups
 
 
 def _change_type(photo: Photo, keep: bool) -> str | None:
