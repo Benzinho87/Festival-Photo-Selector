@@ -1,6 +1,6 @@
 # B² Photo Manager
 
-## Version 0.6.3 – Release Hardening & Packaging Preparation
+## Version 0.7.1 – macOS DMG Packaging
 
 B² Photo Manager ist eine lokale Desktop-Anwendung für die schnelle Sichtung,
 AI-gestützte Auswahl, Review und den Export großer Fotoordner.
@@ -43,6 +43,8 @@ AI-gestützte Auswahl, Review und den Export großer Fotoordner.
 - Schutz vor veralteten Worker-Rückmeldungen nach Projektwechsel
 - reproduzierbare Python-3.12-/PySide6-6.10.3-Umgebung
 - echte Qt/Cocoa-Prüfung vor jedem Testlauf
+- reproduzierbares macOS-App-Bundle über PyInstaller
+- lokales DMG mit App-Bundle und Applications-Link
 
 ## Runtime-Datenorte
 
@@ -95,6 +97,36 @@ chmod +x scripts/*.sh
 
 Das Skript prüft die Umgebung. Ist sie beschädigt oder haben sich
 Abhängigkeiten geändert, wird sie automatisch neu erstellt.
+
+## macOS-App bauen
+
+```bash
+./scripts/build_app.sh
+```
+
+Das erzeugt ein lokal startbares Bundle unter:
+
+```text
+dist/B² Photo Manager.app
+```
+
+Die Packaging-Umgebung liegt außerhalb des Repositories. Der Build nutzt
+PyInstaller, bündelt Python, PySide6, die benötigten Qt-Plugins und Paket-Assets
+und startet anschließend `scripts/verify_app.sh`.
+
+Weitere Details stehen in `packaging/macos/README.md`.
+
+## macOS-DMG bauen
+
+```bash
+./scripts/build_dmg.sh
+```
+
+Das erzeugt nach einem frischen App-Build:
+
+```text
+dist/B² Photo Manager-0.7.1.dmg
+```
 
 ## Vor jedem Commit
 
@@ -152,7 +184,7 @@ Repository und baut die externe Umgebung neu auf.
 - Keine kompletten Projektordner über bestehende Ordner kopieren.
 - Keine `.venv` in Git oder im Projektordner.
 - Keine manuellen Qt-Plugin-Pfade.
-- Start ausschließlich über `scripts/run.sh`.
+- In der Entwicklung über `scripts/run.sh` starten.
 - Für spätere `.app`-Bundles darf Code nicht annehmen, dass `src/`, `cache/`
   oder Repository-Dateien neben der App liegen.
 - Assets immer über `b2_photo_manager.resources.resource_path()` auflösen.

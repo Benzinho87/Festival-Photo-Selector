@@ -107,6 +107,7 @@ class MainWindow(QMainWindow):
         self.current_columns = 0
         self.thread_pool = QThreadPool.globalInstance()
         self.selection_worker: SelectionWorker | None = None
+        self.thumbnail_workers: dict[Path, ThumbnailWorker] = {}
         self.analysis_running = False
         self.load_generation = 0
         self.analysis_generation = 0
@@ -332,6 +333,7 @@ class MainWindow(QMainWindow):
     def _load_photo_objects(self, photos: list[Photo], mark_dirty: bool = True) -> None:
         self.load_generation += 1
         generation = self.load_generation
+        self.thumbnail_workers.clear()
         self._clear_grid()
         self.photos = photos
         self.cards = {}
@@ -359,6 +361,7 @@ class MainWindow(QMainWindow):
                     path, message, item
                 )
             )
+            self.thumbnail_workers[photo.path] = worker
             self.thread_pool.start(worker)
 
         self._refresh_tag_filter()
@@ -590,6 +593,7 @@ class MainWindow(QMainWindow):
         card = self.cards.get(path)
         if card is not None:
             card.set_thumbnail(QPixmap.fromImage(image))
+        self.thumbnail_workers.pop(path, None)
         self.loaded_count += 1
         self._update_status()
 
@@ -600,6 +604,7 @@ class MainWindow(QMainWindow):
         card = self.cards.get(path)
         if card is not None:
             card.set_error(message)
+        self.thumbnail_workers.pop(path, None)
         self.loaded_count += 1
         self._update_status()
 

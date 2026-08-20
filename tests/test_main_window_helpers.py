@@ -52,3 +52,35 @@ def test_export_history_entry_stores_compact_summary(tmp_path) -> None:
     assert entry["format"] == "jpg"
     assert entry["resize_mode"] == "bounding_box"
     assert entry["preset"] == "Website"
+
+
+def test_load_photo_objects_keeps_thumbnail_workers_alive(tmp_path) -> None:
+    from PySide6.QtGui import QImage
+    from PySide6.QtWidgets import QApplication
+
+    from b2_photo_manager.models.photo import Photo
+    from b2_photo_manager.ui.main_window import MainWindow
+
+    class ThreadPoolStub:
+        def __init__(self) -> None:
+            self.started = []
+
+        def start(self, worker) -> None:
+            self.started.append(worker)
+
+    app = QApplication.instance() or QApplication([])
+    photo_path = tmp_path / "bild.jpg"
+    photo_path.write_bytes(b"not a real image")
+
+    window = MainWindow()
+    window.thread_pool = ThreadPoolStub()
+    window._load_photo_objects([Photo(photo_path)], mark_dirty=False)
+    app.processEvents()
+
+    assert photo_path in window.thumbnail_workers
+    assert window.thread_pool.started == [window.thumbnail_workers[photo_path]]
+
+    window._on_thumbnail_loaded(photo_path, QImage(8, 8, QImage.Format.Format_RGB888), 1)
+
+    assert photo_path not in window.thumbnail_workers
+    window.close()

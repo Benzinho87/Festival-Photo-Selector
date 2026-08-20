@@ -36,7 +36,8 @@ def test_resource_path_rejects_unsafe_names() -> None:
 def test_resource_path_supports_pyinstaller_bundle(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr("sys._MEIPASS", str(tmp_path), raising=False)
 
-    assert resource_path("icon.icns") == tmp_path / "b2_photo_manager" / "assets" / "icon.icns"
+    expected = tmp_path / "b2_photo_manager" / "assets" / "placeholder.txt"
+    assert resource_path("placeholder.txt") == expected
 
 
 def test_no_manual_qt_plugin_path_is_configured() -> None:
